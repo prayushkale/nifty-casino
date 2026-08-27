@@ -17,6 +17,7 @@
 		"test:watch": "vitest"
 	},
 	"dependencies": {
+		"@supabase/ssr": "^0.12.5",
 		"@supabase/supabase-js": "^2.45.0",
 		"canvas-confetti": "^1.9.3",
 		"lightweight-charts": "^5.0.0",

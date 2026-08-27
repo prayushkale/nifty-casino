@@ -49,6 +49,122 @@ and logs which one is live, tagged `[db]`:
   uses the `postgres` driver over `DATABASE_URL` directly, while **`supabase-js` is reserved for
   auth admin** (`src/lib/server/supabaseAdmin.ts`).
 
+## Auth
+
+Two modes, picked per request by configuration — never by the caller:
+
+| mode              | when `PUBLIC_SUPABASE_URL` is… | session lives in                        | signup                   |
+| ----------------- | ------------------------------ | --------------------------------------- | ------------------------ |
+| **Supabase**      | set (+ `PUBLIC_SUPABASE_ANON_KEY`) | httpOnly cookies, via `@supabase/ssr` | email + verify link      |
+| **dev fallback**  | unset                          | the `nc_dev_uid` cookie (30 days)       | a handle, claimed directly |
+
+Everything below is play-money auth: the worst a stolen session costs is chips.
+
+### How a request learns who you are
+
+`src/hooks.server.ts` calls `resolveIdentity()` (`src/lib/server/auth/session.ts`) on every
+request and stores the result on `locals`:
+
+- **Supabase configured** → a per-request `@supabase/ssr` client is built over the request's
+  cookies (`getSupabaseForEvent`) and `auth.getUser()` **revalidates the JWT with the auth
+  server**. `getSession()` is never trusted: session cookies are client-held storage. The handle
+  comes from the `profiles` row, which is the one place the *unique* handle lives.
+- **Supabase unconfigured** → the guard in `devAuth.ts` (`isDevAuthEnabled`) is checked again,
+  then `nc_dev_uid` is read and looked up in the same `profiles` table. A cookie pointing at a
+  profile that no longer exists is deleted and the request is anonymous.
+- Anything else is **anonymous**, which is a normal state, not an error.
+
+Routes never touch cookies or Supabase — they read `locals.userId` / `locals.handle`.
+
+### Endpoints (`/api/auth/*`)
+
+| endpoint            | body            | effect                                                              |
+| ------------------- | --------------- | ------------------------------------------------------------------- |
+| `POST /signup`      | email, password, handle?, tos | `auth.signUp` → `{needsVerify}` / dev profile → `{dev:true}` |
+| `POST /login`       | email, password | `signInWithPassword`; **400 `AUTH_NOT_CONFIGURED`** in dev mode      |
+| `POST /logout`      | —               | `signOut()` + dev cookie cleared → `204`                            |
+| `POST /forgot`      | email           | `resetPasswordForEmail` → `/auth/confirm?type=recovery`              |
+| `POST /reset`       | password        | `updateUser({password})` — needs the recovery session                |
+| `POST /resend`      | email           | `auth.resend({type:'signup'})`                                       |
+| `GET /me`           | —               | `{authenticated, handle, source, devAuth}` for the header chrome     |
+
+Unconfigured auth is a **400 `AUTH_NOT_CONFIGURED`, never a 500**: "no Supabase project" is a
+supported state of this app, and the login page uses that code to show the dev panel instead.
+
+Pages: `/auth/signup`, `/auth/verify`, `/auth/login`, `/auth/forgot`, `/auth/reset`, `/terms`,
+and `/auth/confirm` (the link target — exchanges `?code=` or `?token_hash=&type=` server-side,
+then forwards to `/` or `/auth/reset`).
+
+### Handles
+
+`^[a-z0-9_]{3,20}$`, lowercased. Skipped → generated as `trader` + 4 digits, retried on
+collision (requested name → 4 generated → a uuid-derived last resort), exactly the ladder the
+`handle_new_user()` trigger runs. An *invalid* handle is a 400 at the API (a form can ask) but a
+silent generate at the database (a trigger cannot).
+
+### Dev-auth fallback — read this before touching it
+
+With no Supabase project, `POST /api/auth/signup` becomes an **unauthenticated identity-claim
+endpoint**: send a handle, *be* that handle, wallet included. That is what makes local
+multi-player testing trivial (type an existing handle to log in as that player), and it is
+survivable only because:
+
+- the guard is fail-closed: dev auth is dead code the moment `PUBLIC_SUPABASE_URL` is set, and
+  hooks re-check the guard, so a stale dev cookie is worthless in a real deployment;
+- unconfigured means the wallet is in RAM (or a Postgres with no auth provider) — nothing of
+  value is at stake;
+- a half-configured deploy (URL set, anon key missing) keeps dev auth **off** rather than
+  silently switching identity mechanisms.
+
+Never "temporarily" relax the guard to demo something: put a project behind it instead.
+
+Wallet provisioning in dev mirrors the 0002 trigger row for row — `profiles` at
+`SIGNUP_BONUS` (1,000 NC), one `signup_bonus` ledger row with `balance_after = 1,000` (so the
+`sum(ledger) == balance − 1,000` invariant in the launch checklist holds from row one), and a
+zeroed `user_stats` row, all inside a single `store.tx()`.
+
+### What the tests do not cover
+
+Automated tests (`src/lib/server/auth/*.test.ts`) cover handle rules, the signup validator, the
+dev guard, dev wallet math and identity resolution. **They cannot cover the live Supabase
+flows** — signup/verify/login/forgot/reset need a real project and a real inbox. That is what
+the checklist below is for.
+
+### Manual verification checklist (needs a configured project + an inbox)
+
+1. `cp .env.example .env`, fill `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_ANON_KEY`,
+   `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`; `npm run dev`. The login page must **not** show
+   the dev panel now.
+2. **Signup** `/auth/signup` with a handle → lands on `/auth/verify` ("check your inbox").
+3. **Verify** by clicking the emailed link → you are redirected home and the top bar shows your
+   handle.
+4. **Profile + wallet**: in the DB, `profiles` has your handle, `balance = 1000`, `ledger` has
+   one `signup_bonus` row of `+1000` with `balance_after = 1000`, and `user_stats` has a zeroed
+   row. Nothing else may have been written.
+5. **Logout** via the top bar → `204`, the bar flips to "Log in / Sign up", `/api/auth/me`
+   reports `authenticated: false`.
+6. **Login** `/auth/login` with the same credentials → back home, same handle and balance.
+7. **Handle uniqueness**: sign up a second account requesting the *same* handle → 400 with a
+   `fields.handle` error. Sign up with the handle left blank → a `trader####` handle is assigned.
+8. **Forgot/reset**: `/auth/forgot` → email → link lands on `/auth/reset` → set a new password →
+   login with the new password works, the old one does not.
+9. **Resend**: on `/auth/verify` hit "Resend the link" → a second email arrives (the built-in
+   provider rate-limits to one per 60s; the 429 is shown, not swallowed).
+10. **Expired/second-click link**: open the same confirmation link twice → the second click lands
+    on `/auth/login` with a readable banner, not a 500.
+11. **Dev fallback is really off**: with the env vars set, `curl -X POST localhost:5173/api/auth/signup
+    -d '{"email":"x@y.co","password":"12345678","handle":"hijack","tos":true}'` must go through
+    Supabase (check the inbox) — never mint an `nc_dev_uid` cookie.
+12. **Dev mode on a fresh clone** (env vars removed): the dev panel appears, entering a handle
+    mints 1,000 NC + the ledger row in the memory store, and the same handle logs you back in.
+
+> **Email templates.** Supabase's built-in templates link with `{{ .ConfirmationURL }}`, which
+> honours the `emailRedirectTo`/`redirectTo` values above. If you follow the Supabase SSR guides
+> instead and build links from `{{ .TokenHash }}`, point them at
+> `<site-url>/auth/confirm?token_hash={{ .TokenHash }}&type=signup` (or `type=recovery` for
+> resets) — `/auth/confirm` handles both shapes. If confirmations are switched **off** in the
+> Supabase dashboard, signup returns a live session and the app skips `/auth/verify` entirely.
+
 ## Supabase setup (production auth + Postgres)
 
 Roughly five minutes. Skip it entirely for local development.

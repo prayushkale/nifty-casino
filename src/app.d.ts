@@ -3,10 +3,13 @@
 
 declare global {
 	namespace App {
-		/** The user id (uuid) set by auth hooks in `hooks.server.ts`. */
 		interface Locals {
+			/** The user id (uuid) set by auth hooks in `hooks.server.ts`. */
 			userId: string | null;
+			/** The unique public handle, from the `profiles` row. */
 			handle: string | null;
+			/** Which session mechanism answered — see $lib/server/auth/session. */
+			authSource: 'supabase' | 'dev' | null;
 		}
 	}
 }
