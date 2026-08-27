@@ -39,6 +39,26 @@ function istFields(d: Date): {
 
 const pad2 = (n: number): string => String(n).padStart(2, '0');
 
+/** Strictly formatted IST calendar date, e.g. '2026-08-27'. */
+const IST_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Parse an 'YYYY-MM-DD' calendar date into its UTC-midnight instant, or throw.
+ * A NaN check alone is not enough: JS date parsing silently rolls impossible dates
+ * forward ('2023-02-29' → 2023-03-01), so require the round-trip to match too.
+ */
+function parseIstDate(dateStr: string): Date {
+	const d = new Date(`${dateStr}T00:00:00Z`);
+	if (
+		!IST_DATE_RE.test(dateStr) ||
+		Number.isNaN(d.getTime()) ||
+		d.toISOString().slice(0, 10) !== dateStr
+	) {
+		throw new Error(`invalid date string: ${dateStr}`);
+	}
+	return d;
+}
+
 /** 'YYYY-MM-DD' calendar date of an instant on the IST clock. */
 export function istDateStr(d: Date = new Date()): string {
 	const f = istFields(d);
@@ -78,25 +98,21 @@ export function isBetweenHMS(d: Date, start: Hms, end: Hms): boolean {
 /** Saturday/Sunday check for an IST calendar date ('YYYY-MM-DD'). */
 export function isWeekend(dateStr: string): boolean {
 	// Parse as pure UTC date — no TZ shifts since we only need the weekday.
-	const d = new Date(`${dateStr}T00:00:00Z`);
-	if (Number.isNaN(d.getTime())) throw new Error(`invalid date string: ${dateStr}`);
+	const d = parseIstDate(dateStr);
 	const wd = d.getUTCDay();
 	return wd === 0 || wd === 6;
 }
 
 /** Shift an IST calendar date ('YYYY-MM-DD') by n days → next IST date string. */
 export function shiftIstDate(dateStr: string, days: number): string {
-	const d = new Date(`${dateStr}T00:00:00Z`);
-	if (Number.isNaN(d.getTime())) throw new Error(`invalid date string: ${dateStr}`);
+	const d = parseIstDate(dateStr);
 	d.setUTCDate(d.getUTCDate() + days);
 	return d.toISOString().slice(0, 10);
 }
 
 /** ISO timestamp of IST midnight (as absolute ms) for a given IST date string — session boundaries. */
 export function istDateStrToMidnightUtcMs(dateStr: string): number {
-	const d = new Date(`${dateStr}T00:00:00Z`);
-	if (Number.isNaN(d.getTime())) throw new Error(`invalid date string: ${dateStr}`);
-	return d.getTime() - OFFSET_MS;
+	return parseIstDate(dateStr).getTime() - OFFSET_MS;
 }
 
 /** Current instant's IST date + whether today is a trading day (weekend filter; holidays handled by data layer). */
