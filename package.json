@@ -19,7 +19,8 @@
 	"dependencies": {
 		"@supabase/supabase-js": "^2.45.0",
 		"canvas-confetti": "^1.9.3",
-		"lightweight-charts": "^5.0.0"
+		"lightweight-charts": "^5.0.0",
+		"postgres": "^3.4.9"
 	},
 	"devDependencies": {
 		"@eslint/js": "^9.8.0",
