@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+	html {
+		scrollbar-color: theme('colors.zinc.700') transparent;
+	}
+	body {
+		background-image: radial-gradient(
+				1200px 600px at 80% -10%,
+				rgba(245, 196, 81, 0.06),
+				transparent
+			),
+			radial-gradient(900px 500px at -10% 110%, rgba(52, 211, 153, 0.05), transparent);
+	}
+	num,
+	.num {
+		font-family: theme('fontFamily.num');
+		font-variant-numeric: tabular-nums;
+	}
+}

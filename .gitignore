@@ -1,0 +1,26 @@
+node_modules
+
+# Output
+.output
+.vercel
+.netlify
+.build
+build
+dist
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Tooling local state
+.commandcode/
+coverage/
