@@ -36,8 +36,8 @@
  * });
  * ```
  *
- * `placeBet` / `settleBets` are declared below as throw-on-call placeholders so the
- * money tasks have a fixed signature to fill in — see the TODO(T7)/TODO(T9) notes.
+ * `placeBet` is implemented (T7) as the shared body in ./money running inside
+ * `tx()`; `settleBets` is still a throw-on-call placeholder (TODO(T9)).
  */
 import type {
 	Bet,
@@ -113,6 +113,38 @@ export class AlreadySettledError extends DbError {
 	}
 }
 
+/** The trading day is not accepting bets (no session row, or it is locked/settled). */
+export class SessionClosedError extends DbError {
+	constructor(tradeDate: string) {
+		super(`session ${tradeDate} is not open for bets`, 'SESSION_CLOSED');
+		this.name = 'SessionClosedError';
+	}
+}
+
+/** A bet arrived after the day's 15:20:00 IST cutoff. Server clock is authoritative. */
+export class CutoffPassedError extends DbError {
+	constructor(
+		readonly nowMs: number,
+		readonly cutoffAtMs: number
+	) {
+		super(`cutoff passed: now ${nowMs} is after ${cutoffAtMs}`, 'CUTOFF_PASSED');
+		this.name = 'CutoffPassedError';
+	}
+}
+
+/**
+ * The user already has an active bet on this index for this session — the "one
+ * active bet per index per day" rule of PLAN §0, enforced by the
+ * `unique (user_id, session_id, underlying)` key. The existing bet's id travels
+ * with the error so the service (and the 409 it maps to) can point at it.
+ */
+export class BetExistsError extends DbError {
+	constructor(readonly betId: string) {
+		super(`bet ${betId} already covers this index for this session`, 'BET_EXISTS');
+		this.name = 'BetExistsError';
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Domain groups
 // ---------------------------------------------------------------------------
@@ -165,6 +197,18 @@ export type BetRepo = {
 	 * the CALLER's job inside the same tx (see {@link GameStore.tx}).
 	 */
 	upsertBet(bet: NewBet): Promise<Bet>;
+	/**
+	 * Remove a bet outright — the cancel path (T7). Deleting (rather than marking)
+	 * is what frees the unique `(user_id, session_id, underlying)` slot so the user
+	 * can bet that index again the same day; the ledger rows are the audit trail of
+	 * the stake that left and the refund that came back.
+	 *
+	 * Driver note: migration 0001 declares `ledger.ref_bet_id → bets(id)` with no
+	 * `on delete` action, and migrations are frozen. Postgres therefore detaches the
+	 * ledger references (amounts and `balance_after` untouched) before the delete;
+	 * the memory driver has no FK and keeps them. Money never changes either way.
+	 */
+	deleteBet(betId: string): Promise<void>;
 	/** Mark settled. Throws {@link AlreadySettledError} if the bet was already settled. */
 	setBetOutcome(
 		betId: string,
@@ -284,9 +328,20 @@ export type GameStore = TxStore & {
 	// this interface); both currently throw.
 
 	/**
-	 * TODO(T7) — `src/lib/server/bets.ts`. One transaction: session open + pre-cutoff
-	 * check, ladder membership, `lockForUpdate` balance check, bet upsert, stake ledger
-	 * row, `daily_pots` + `user_stats` deltas.
+	 * T7 — the placement money path, one atomic unit (see `placeBetInTx` in ./money,
+	 * which both drivers run): session open + pre-cutoff check, wallet
+	 * `lockForUpdate` + stake deduction, the one-bet-per-index rule, stake ledger row,
+	 * then `daily_pots` + `user_stats` deltas.
+	 *
+	 * The service layer (`$lib/server/bets`) owns everything user-facing: ladder
+	 * membership and the odds (resolved server-side, never taken from the client),
+	 * the IST window and the stake bounds. It hands this method a settled input plus
+	 * `cutoffAtMs`/`nowMs` so the driver can re-derive the same verdict from the
+	 * session row — two independent gates on the same cutoff.
+	 *
+	 * Throws {@link SessionClosedError}, {@link CutoffPassedError},
+	 * {@link NotFoundError} (unknown wallet), {@link InsufficientFundsError} and
+	 * {@link BetExistsError}; every one of them leaves the store untouched.
 	 */
 	placeBet(input: {
 		userId: string;
@@ -294,8 +349,13 @@ export type GameStore = TxStore & {
 		underlying: Underlying;
 		targetKind: 'up' | 'down';
 		deltaPoints: number;
+		/** Copied from the ladder by the service — the driver stores it verbatim. */
 		odds: number;
 		stake: number;
+		/** 15:20:00 IST of `tradeDate`, in epoch ms. */
+		cutoffAtMs: number;
+		/** The instant the request was judged at. */
+		nowMs: number;
 	}): Promise<Bet>;
 
 	/**
@@ -311,10 +371,10 @@ export type GameStore = TxStore & {
 	}): Promise<{ settled: number; skipped: number }>;
 };
 
-/** Shared throw-on-call bodies for the money placeholders. */
-export function moneyOpNotImplemented(op: 'placeBet' | 'settleBets'): never {
+/** Shared throw-on-call body for the money operations still to come. */
+export function moneyOpNotImplemented(op: 'settleBets'): never {
 	throw new DbError(
-		`GameStore.${op} is not implemented yet — it lands in T7 (bets) / T9 (settlement). ` +
+		`GameStore.${op} is not implemented yet — it lands in T9 (settlement). ` +
 			'Until then, compose the same steps yourself inside store.tx().',
 		'NOT_IMPLEMENTED'
 	);

@@ -31,6 +31,7 @@
 import postgres from 'postgres';
 import {
 	AlreadySettledError,
+	BetExistsError,
 	DbError,
 	DuplicatePayoutError,
 	InsufficientFundsError,
@@ -46,6 +47,7 @@ import {
 	type TickRepo,
 	type TxStore
 } from './interface';
+import { placeBetInTx, type PlaceBetInput } from './money';
 import type {
 	Bet,
 	CasTickRow,
@@ -80,6 +82,8 @@ const UNIQUE_VIOLATION = '23505';
 const CONSTRAINT = {
 	profilesPkey: 'profiles_pkey',
 	profilesHandleKey: 'profiles_handle_key',
+	// Postgres derives this from the inline `unique (user_id, session_id, underlying)`.
+	betsUnique: 'bets_user_id_session_id_underlying_key',
 	ledgerPayoutOnce: 'ledger_payout_once'
 } as const;
 
@@ -336,6 +340,17 @@ function isPayoutOnceViolation(err: unknown): boolean {
 	return pg.constraint === null || pg.constraint === CONSTRAINT.ledgerPayoutOnce;
 }
 
+/**
+ * True when an INSERT into `bets` lost the one-bet-per-index race. Only that
+ * table's unique key can fire on that statement (the id is a generated uuid), so
+ * a bare 23505 with an unnamed constraint is accepted for older Postgres.
+ */
+function isBetUniqueViolation(err: unknown): boolean {
+	const pg = asPgError(err);
+	if (!pg || pg.code !== UNIQUE_VIOLATION) return false;
+	return pg.constraint === null || pg.constraint === CONSTRAINT.betsUnique;
+}
+
 // ---------------------------------------------------------------------------
 // The store
 // ---------------------------------------------------------------------------
@@ -503,6 +518,15 @@ function createRepos(sql: SqlClient): TxStore {
 			const exists = await sql`select settled_at from bets where id = ${betId}`;
 			if (exists.length === 0) throw new NotFoundError(`bet ${betId}`);
 			throw new AlreadySettledError(`bet ${betId}`);
+		},
+		// Cancel path. Migration 0001 gives `ledger.ref_bet_id` a plain FK to
+		// `bets(id)` with no `on delete` action and migrations are frozen, so the
+		// references are detached first: without that, the stake row written at
+		// placement would make the delete impossible. Only the pointer is dropped —
+		// the amounts and `balance_after` that make the ledger an audit trail stay.
+		deleteBet: async (betId) => {
+			await sql`update ledger set ref_bet_id = null where ref_bet_id = ${betId}`;
+			await sql`delete from bets where id = ${betId}`;
 		}
 	};
 
@@ -722,11 +746,22 @@ export class PostgresStore implements GameStore {
 		await this.pool.end({ timeout: 5 });
 	}
 
-	async placeBet(): Promise<Bet> {
-		throw new DbError(
-			'PostgresStore.placeBet is a TODO(T7) placeholder — compose the steps inside store.tx() for now.',
-			'NOT_IMPLEMENTED'
-		);
+	async placeBet(input: PlaceBetInput): Promise<Bet> {
+		try {
+			// The money path is the shared body in ./money, one transaction.
+			return await this.tx((t) => placeBetInTx(t, input));
+		} catch (err: unknown) {
+			// Belt to the pre-check inside the body: a writer that skipped the wallet
+			// lock can still lose the race, and the unique key says what the pre-check
+			// would have. The existing bet's id is fetched so the 409 can point at it.
+			if (!isBetUniqueViolation(err)) throw err;
+			const rows = await this.pool`
+				select b.id from bets b
+				join daily_sessions s on s.id = b.session_id
+				where b.user_id = ${input.userId} and s.trade_date = ${input.tradeDate}
+				  and b.underlying = ${input.underlying}`;
+			throw new BetExistsError(rows.length > 0 ? String(rows[0].id) : '(existing bet)');
+		}
 	}
 
 	async settleBets(): Promise<{ settled: number; skipped: number }> {

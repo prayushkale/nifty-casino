@@ -6,6 +6,13 @@
 /** IST = UTC+5:30 all year — India has no DST. */
 export const APP_TIMEZONE_OFFSET_MIN = 330;
 
+/**
+ * Bet placement OPENS here, IST (PLAN §0: the participation window is
+ * 15:00 → 15:20:00). Before this the day's session is not accepting bets.
+ * The cutoff is {@link CUTOFF_HMS}; both ends are inclusive.
+ */
+export const BETTING_START_HMS = { h: 15, m: 0, s: 0 } as const;
+
 /** Bet placement closes exactly here (inclusive up to this instant), IST. */
 export const CUTOFF_HMS = { h: 15, m: 20, s: 0 } as const;
 

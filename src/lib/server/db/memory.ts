@@ -37,6 +37,7 @@ import {
 	type TxStore
 } from './interface';
 import { Mutex } from './mutex';
+import { placeBetInTx, type PlaceBetInput } from './money';
 import type {
 	Bet,
 	CasTickRow,
@@ -265,6 +266,12 @@ export class MemoryStore implements GameStore {
 			bet.settlementTier = tier satisfies SettlementTier;
 			bet.payout = payout;
 			bet.settledAt = settledAt;
+		},
+		// Cancel path: the row goes away so the (user, session, underlying) slot frees
+		// up. No FK to satisfy here, so the ledger keeps its ref_bet_id — see the
+		// interface note on deleteBet for how Postgres differs.
+		deleteBet: async (betId) => {
+			this.betsById.delete(betId);
 		}
 	};
 
@@ -503,17 +510,19 @@ export class MemoryStore implements GameStore {
 		return Promise.resolve();
 	}
 
-	async placeBet(): Promise<Bet> {
-		throw this.notYet('placeBet');
+	// The money path is the shared body in ./money running as ONE transaction —
+	// the memory driver differs from Postgres only in how `tx()` is implemented.
+	placeBet(input: PlaceBetInput): Promise<Bet> {
+		return this.tx((t) => placeBetInTx(t, input));
 	}
 
 	async settleBets(): Promise<{ settled: number; skipped: number }> {
 		throw this.notYet('settleBets');
 	}
 
-	private notYet(op: 'placeBet' | 'settleBets'): DbError {
+	private notYet(op: 'settleBets'): DbError {
 		return new DbError(
-			`MemoryStore.${op} is a TODO(T7/T9) placeholder — compose the steps inside store.tx() for now.`,
+			`MemoryStore.${op} is a TODO(T9) placeholder — compose the steps inside store.tx() for now.`,
 			'NOT_IMPLEMENTED'
 		);
 	}

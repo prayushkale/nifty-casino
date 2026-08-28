@@ -25,10 +25,13 @@ import type { GameStore } from './interface';
 export type { GameStore, TxStore } from './interface';
 export {
 	AlreadySettledError,
+	BetExistsError,
+	CutoffPassedError,
 	DbError,
 	DuplicatePayoutError,
 	InsufficientFundsError,
-	NotFoundError
+	NotFoundError,
+	SessionClosedError
 } from './interface';
 export { MemoryStore } from './memory';
 export {
