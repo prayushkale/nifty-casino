@@ -47,7 +47,13 @@ import {
 	type TickRepo,
 	type TxStore
 } from './interface';
-import { placeBetInTx, type PlaceBetInput } from './money';
+import {
+	placeBetInTx,
+	settleBetsInTx,
+	type PlaceBetInput,
+	type SettleBetsInput,
+	type SettleBetsResult
+} from './money';
 import type {
 	Bet,
 	CasTickRow,
@@ -391,6 +397,16 @@ function createRepos(sql: SqlClient): TxStore {
 			const rows =
 				await sql`update daily_sessions set status = ${status} where id = ${sessionId} returning id`;
 			if (rows.length === 0) throw new NotFoundError(`session ${sessionId}`);
+		},
+		// One UPDATE with the expected state in the WHERE: the claim is a single row
+		// write, so two overlapping settle runs cannot both win. A row that does not
+		// exist also answers `false` — callers have already read the session.
+		setSessionStatusIf: async (sessionId, status, expected) => {
+			const rows = await sql`
+				update daily_sessions set status = ${status}
+				where id = ${sessionId} and status = any(${expected})
+				returning id`;
+			return rows.length > 0;
 		}
 	};
 
@@ -467,6 +483,20 @@ function createRepos(sql: SqlClient): TxStore {
 			const exists = await sql`select balance from profiles where user_id = ${userId}`;
 			if (exists.length === 0) throw new NotFoundError(`profile ${userId}`);
 			throw new InsufficientFundsError(userId, Math.max(0, -delta), toNum(exists[0].balance));
+		},
+		// Settlement's gamification write (T9): XP accrues, the streak is stamped with
+		// the values the caller derived under the wallet lock. A date column takes the
+		// same 'YYYY-MM-DD' text `ensureSession` already sends.
+		applyProfileProgress: async (userId, next) => {
+			const rows = await sql`
+				update profiles
+				set xp = xp + ${next.xpDelta},
+				    streak_days = ${next.streakDays},
+				    last_bet_date = ${next.lastBetDate}
+				where user_id = ${userId}
+				returning *`;
+			if (rows.length === 0) throw new NotFoundError(`profile ${userId}`);
+			return mapProfile(rows[0]);
 		}
 	};
 
@@ -764,11 +794,12 @@ export class PostgresStore implements GameStore {
 		}
 	}
 
-	async settleBets(): Promise<{ settled: number; skipped: number }> {
-		throw new DbError(
-			'PostgresStore.settleBets is a TODO(T9) placeholder — compose the steps inside store.tx() for now.',
-			'NOT_IMPLEMENTED'
-		);
+	settleBets(input: SettleBetsInput): Promise<SettleBetsResult> {
+		// The settlement money path is the shared body in ./money, one transaction
+		// per chunk. Payout-once comes from the `ledger_payout_once` index (translated
+		// to DuplicatePayoutError in the ledger repo), settled-once from
+		// `setBetOutcome`'s `settled_at is null` predicate.
+		return this.tx((t) => settleBetsInTx(t, input));
 	}
 
 	// -- GameStore: the read/write groups, bound to the pool (autocommit) ----------------

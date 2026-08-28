@@ -48,4 +48,48 @@ export const CAS_STALE_MS = 12_000;
 export const MIN_STAKE = 10;
 export const MAX_STAKE = 100_000;
 
+// ---------------------------------------------------------------------------
+// Settlement (PLAN §5 T9) — capture, chunking and the gamification accrual
+// ---------------------------------------------------------------------------
+
+/**
+ * Official-close capture + settlement may first fire here, IST — one minute after
+ * {@link AUCTION_END_HMS}, so a nominal 15:42:00 finish is already on disk. The
+ * capture itself still refuses to run before 15:42 and the scheduler keeps
+ * re-checking until {@link SETTLE_END_HMS}, which is what absorbs an auction
+ * extension (PLAN §6 R2): closes that are not there yet are retried, never guessed.
+ */
+export const SETTLE_START_HMS = { h: 15, m: 43, s: 0 } as const;
+
+/**
+ * Last instant the settlement window stays open, IST (inclusive). Past this the
+ * day gives up loudly and the session stays open — an unsettled day is visible,
+ * a wrongly-settled one is not fixable.
+ */
+export const SETTLE_END_HMS = { h: 17, m: 0, s: 0 } as const;
+
+/**
+ * Re-check cadence inside the settlement window (ms). A cycle that finds the
+ * official closes missing (or only some of them) waits this long and tries again
+ * rather than settling on a live indicative.
+ */
+export const SETTLE_RETRY_MS = 60_000;
+
+/** Re-check cadence outside the settlement window (ms) — do not hammer timers for 22h. */
+export const SETTLE_IDLE_RECHECK_MS = 30_000;
+
+/**
+ * Bets settled per transaction (PLAN §6 R7): 10 lakh users × 3 bets = 30 lakh rows
+ * a day, and one transaction per 5,000 keeps each unit of work well inside a
+ * minute (and under every statement/lock budget) while a failure only rolls back
+ * its own chunk — the payout-once ledger makes re-running the rest free.
+ */
+export const SETTLE_CHUNK = 5000;
+
+/** XP for every bet that settles, hit or miss (PLAN §5 T9). */
+export const XP_PER_BET = 10;
+
+/** Extra XP for each HIT, on top of {@link XP_PER_BET}. */
+export const XP_PER_HIT = 100;
+
 export type Hms = { h: number; m: number; s: number };

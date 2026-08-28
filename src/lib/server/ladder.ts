@@ -71,7 +71,11 @@ async function loadCloseIndex(store: GameStore, tradeDate: string): Promise<Clos
 	const index: CloseIndex = new Map();
 
 	const hasOfficialFor = (underlying: LadderUnderlying): boolean => {
-		for (const byUnderlying of index.values()) {
+		for (const [date, byUnderlying] of index) {
+			// Today's own row is never proof that an official close exists: after the
+			// settlement engine (T9) lands today's close, that row IS today's close, and
+			// treating it as an anchor would make every Δ zero. Only a previous day counts.
+			if (date === tradeDate) continue;
 			if (byUnderlying.get(underlying as Underlying)?.source === 'official') return true;
 		}
 		return false;
@@ -108,7 +112,11 @@ function pickAnchor(
 	tradeDate: string,
 	underlying: LadderUnderlying
 ): number | null {
-	let fallback: IndexClose | null = index.get(tradeDate)?.get(underlying as Underlying) ?? null;
+	// Today's own row is the poller's live prevClose, and only ever a fallback. Once
+	// the day has an OFFICIAL close of its own it is a close, not an anchor — using
+	// it would measure every move against zero and refund the whole day.
+	const todayRow = index.get(tradeDate)?.get(underlying as Underlying) ?? null;
+	let fallback: IndexClose | null = todayRow?.source === 'official' ? null : todayRow;
 
 	for (const [date, byUnderlying] of index) {
 		// Today's own row is not "the previous day's close" — it is only ever a

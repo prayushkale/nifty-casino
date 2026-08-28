@@ -1,14 +1,16 @@
 /**
- * `placeBet` — the driver-level money path (PLAN §5 T7), run against BOTH drivers.
+ * `placeBet` / `settleBets` — the driver-level money paths (PLAN §5 T7/T9), run
+ * against BOTH drivers.
  *
  * The memory driver always runs; the Postgres driver runs the same table behind
  * `describe.skipIf(!DATABASE_URL)`, exactly like ./postgres.test.ts. One table,
  * two drivers, is the point: a divergence here would be a money bug that only
  * production could see.
  *
- * `placeBet` is deliberately dumb — it validates the session and the wallet and
- * nothing else. The service layer (`$lib/server/bets.test.ts`) owns windows,
- * weekends, stakes and the ladder.
+ * Both methods are deliberately dumb — they move money and refuse to move it
+ * twice. Windows, weekends, stakes and the odds belong to the service layer
+ * (`$lib/server/bets`); which tier a bet lands in belongs to
+ * (`$lib/server/settle`).
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import postgres from 'postgres';
@@ -23,7 +25,8 @@ import {
 import { MemoryStore } from './memory';
 import { PostgresStore } from './postgres';
 import { SIGNUP_BONUS } from '$lib/config/app';
-import type { DailyPot, UserStats } from './types';
+import type { Bet, DailyPot, SettlementTier, Underlying, UserStats } from './types';
+import type { SettleOutcomeInput } from './money';
 
 // ---------------------------------------------------------------------------
 // the table, parameterised by driver
@@ -270,7 +273,280 @@ function moneySuite(label: string, makeHarness: () => Promise<Harness>): void {
 	});
 }
 
+/**
+ * Register the `settleBets` behaviour table for one driver. The tier/payout
+ * decisions were made upstream; what this table pins is that money moves once and
+ * only once, on either driver.
+ */
+function settleBetsSuite(label: string, makeHarness: () => Promise<Harness>): void {
+	describe(`settleBets — ${label}`, () => {
+		const A = '00000000-0000-4000-8000-00000000a101';
+		const B = '00000000-0000-4000-8000-00000000b202';
+		const STAKE = 100;
+
+		let h: Harness;
+		let store: GameStore;
+		beforeEach(async () => {
+			h = await makeHarness();
+			store = h.store;
+			await h.seedUser(A, SIGNUP_BONUS);
+			await h.seedUser(B, SIGNUP_BONUS);
+			await store.sessions.ensureSession(h.tradeDate, h.cutoffAtMs);
+			// One bet per tier for A, one hit for B.
+			await place(A, 'nifty', 6); // → hit
+			await place(A, 'banknifty', 4.5); // → flat
+			await place(A, 'sensex', 3.2); // → miss
+			await place(B, 'nifty', 6); // → hit
+		});
+
+		const place = (
+			userId: string,
+			underlying: Underlying,
+			odds: number,
+			stake = STAKE
+		): Promise<Bet> =>
+			store.placeBet({
+				userId,
+				tradeDate: h.tradeDate,
+				underlying,
+				targetKind: 'up',
+				deltaPoints: 50,
+				odds,
+				stake,
+				cutoffAtMs: h.cutoffAtMs,
+				nowMs: h.cutoffAtMs
+			});
+
+		const sessionId = async (): Promise<number> =>
+			(await store.sessions.getSessionByDate(h.tradeDate))?.id ?? 0;
+
+		/** The bet ids, keyed by the tier the service would have computed. */
+		const ids = async (): Promise<{ hit: string; flat: string; miss: string; bHit: string }> => {
+			const bets = await store.bets.listBetsForSession(await sessionId());
+			const byUnderlying = new Map(bets.map((bet) => [`${bet.userId}:${bet.underlying}`, bet]));
+			return {
+				hit: byUnderlying.get(`${A}:nifty`)!.id,
+				flat: byUnderlying.get(`${A}:banknifty`)!.id,
+				miss: byUnderlying.get(`${A}:sensex`)!.id,
+				bHit: byUnderlying.get(`${B}:nifty`)!.id
+			};
+		};
+
+		const outcome = async (
+			betId: string,
+			tier: SettlementTier,
+			payout: number
+		): Promise<SettleOutcomeInput> => {
+			const bet = await store.bets.getBetById(betId);
+			return { betId, userId: bet!.userId, stake: bet!.stake, odds: bet!.odds, tier, payout };
+		};
+
+		const ledgerSum = async (userId = A): Promise<number> =>
+			(await store.ledger.getLedgerForUser(userId)).reduce((total, row) => total + row.amount, 0);
+
+		it('marks a hit settled, credits the wallet and writes one payout ledger row', async () => {
+			const { hit } = await ids();
+			const result = await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes: [await outcome(hit, 'hit', 600)]
+			});
+
+			expect(result.settled).toBe(1);
+			expect(result.skipped).toBe(0);
+			expect(result.byUser).toEqual([{ userId: A, settled: 1, hits: 1, payout: 600 }]);
+			expect(await store.bets.getBetById(hit)).toMatchObject({
+				settlementTier: 'hit',
+				payout: 600,
+				settledAt: expect.any(Number)
+			});
+			// 1000 − 300 of stakes (three bets) + 600 back
+			expect((await store.profiles.getProfile(A))?.balance).toBe(SIGNUP_BONUS - 3 * STAKE + 600);
+			expect(await ledgerSum(A)).toBe(-3 * STAKE + 600);
+			const payoutRow = (await store.ledger.getLedgerForUser(A)).find(
+				(row) => row.kind === 'payout'
+			);
+			expect(payoutRow).toMatchObject({
+				amount: 600,
+				refBetId: hit,
+				balanceAfter: SIGNUP_BONUS - 3 * STAKE + 600
+			});
+			expect(await store.pots.getDailyPot(h.tradeDate)).toMatchObject({ totalPaidOut: 600 });
+			expect(await store.stats.getUserStats(A)).toMatchObject({
+				betsWon: 1,
+				totalWon: 600,
+				bestPayout: 600
+			});
+		});
+
+		it('refunds a flat, and pays nothing at all for a miss', async () => {
+			const { flat, miss } = await ids();
+			await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes: [await outcome(flat, 'flat', STAKE), await outcome(miss, 'miss', 0)]
+			});
+
+			expect(await store.bets.getBetById(flat)).toMatchObject({
+				settlementTier: 'flat',
+				payout: STAKE
+			});
+			expect(await store.bets.getBetById(miss)).toMatchObject({
+				settlementTier: 'miss',
+				payout: 0
+			});
+			// −300 staked, +100 refunded for the flat; the miss's stake is simply gone.
+			expect((await store.profiles.getProfile(A))?.balance).toBe(SIGNUP_BONUS - 2 * STAKE);
+			const rows = await store.ledger.getLedgerForUser(A);
+			expect(rows.filter((row) => row.kind === 'refund')).toHaveLength(1);
+			expect(rows.filter((row) => row.kind === 'payout')).toHaveLength(0);
+			// A miss writes no ledger row at all — the stake row from placement is all there is.
+			expect(rows.filter((row) => row.refBetId === miss)).toHaveLength(1);
+			expect(await store.pots.getDailyPot(h.tradeDate)).toMatchObject({ totalPaidOut: STAKE });
+			// A refund is not a win: best_payout does move, bets_won does not.
+			expect(await store.stats.getUserStats(A)).toMatchObject({ betsWon: 0, totalWon: STAKE });
+		});
+
+		it('settles a mixed chunk in one transaction', async () => {
+			const { hit, flat, miss, bHit } = await ids();
+			const result = await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes: [
+					await outcome(hit, 'hit', 600),
+					await outcome(flat, 'flat', STAKE),
+					await outcome(miss, 'miss', 0),
+					await outcome(bHit, 'hit', 300)
+				]
+			});
+
+			expect(result.settled).toBe(4);
+			expect(result.byUser).toEqual([
+				{ userId: A, settled: 3, hits: 1, payout: 700 },
+				{ userId: B, settled: 1, hits: 1, payout: 300 }
+			]);
+			expect((await store.profiles.getProfile(A))?.balance).toBe(SIGNUP_BONUS - 3 * STAKE + 700);
+			expect((await store.profiles.getProfile(B))?.balance).toBe(SIGNUP_BONUS - STAKE + 300);
+			expect(await store.pots.getDailyPot(h.tradeDate)).toMatchObject({ totalPaidOut: 1_000 });
+		});
+
+		it('is a numerical no-op when the same outcomes are sent again', async () => {
+			const { hit, flat, miss, bHit } = await ids();
+			const outcomes = [
+				await outcome(hit, 'hit', 600),
+				await outcome(flat, 'flat', STAKE),
+				await outcome(miss, 'miss', 0),
+				await outcome(bHit, 'hit', 300)
+			];
+			await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes
+			});
+			const balances = await Promise.all([A, B].map(async (u) => store.profiles.getProfile(u)));
+			const pot = await store.pots.getDailyPot(h.tradeDate);
+			const stats = await store.stats.getUserStats(A);
+			const ledgerRows = await store.ledger.getLedgerForUser(A);
+
+			const again = await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes
+			});
+
+			expect(again).toEqual({ settled: 0, skipped: 4, byUser: [] });
+			expect(await Promise.all([A, B].map(async (u) => store.profiles.getProfile(u)))).toEqual(
+				balances
+			);
+			expect(await store.pots.getDailyPot(h.tradeDate)).toEqual(pot);
+			expect(await store.stats.getUserStats(A)).toEqual(stats);
+			expect(await store.ledger.getLedgerForUser(A)).toEqual(ledgerRows);
+		});
+
+		it('refuses to pay a bet that already has a payout row but no settled_at', async () => {
+			// The state a crash between two statements would have left, had settlement
+			// not been a single transaction. The payout-once index is the backstop.
+			const { hit } = await ids();
+			await store.tx(async (t) => {
+				await t.ledger.appendLedger({
+					userId: A,
+					kind: 'payout',
+					amount: 600,
+					refBetId: hit,
+					balanceAfter: SIGNUP_BONUS - 3 * STAKE + 600
+				});
+			});
+
+			const result = await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes: [await outcome(hit, 'hit', 600)]
+			});
+
+			expect(result.settled).toBe(0);
+			expect(result.skipped).toBe(1);
+			expect((await store.profiles.getProfile(A))?.balance).toBe(SIGNUP_BONUS - 3 * STAKE);
+		});
+
+		it('skips outcomes that do not match the row they describe', async () => {
+			const { hit } = await ids();
+			const result = await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes: [
+					{ betId: hit, userId: A, stake: 999, odds: 6, tier: 'hit', payout: 9_999 },
+					{
+						betId: '00000000-0000-4000-8000-00000000nope',
+						userId: A,
+						stake: 1,
+						odds: 6,
+						tier: 'hit',
+						payout: 6
+					}
+				]
+			});
+
+			expect(result.settled).toBe(0);
+			expect(result.skipped).toBe(2);
+			expect((await store.profiles.getProfile(A))?.balance).toBe(SIGNUP_BONUS - 3 * STAKE);
+		});
+
+		it('skips outcomes belonging to another session', async () => {
+			const { hit } = await ids();
+			const result = await store.settleBets({
+				sessionId: (await sessionId()) + 999_999,
+				tradeDate: h.tradeDate,
+				outcomes: [await outcome(hit, 'hit', 600)]
+			});
+
+			expect(result).toEqual({ settled: 0, skipped: 1, byUser: [] });
+			expect((await store.bets.getBetById(hit))?.settledAt).toBeNull();
+		});
+
+		it('keeps the PLAN §8 launch-gate invariant across a settled day', async () => {
+			const { hit, flat, miss, bHit } = await ids();
+			await store.settleBets({
+				sessionId: await sessionId(),
+				tradeDate: h.tradeDate,
+				outcomes: [
+					await outcome(hit, 'hit', 600),
+					await outcome(flat, 'flat', STAKE),
+					await outcome(miss, 'miss', 0),
+					await outcome(bHit, 'hit', 300)
+				]
+			});
+
+			for (const userId of [A, B]) {
+				const balance = (await store.profiles.getProfile(userId))?.balance ?? 0;
+				expect(await ledgerSum(userId)).toBe(balance - SIGNUP_BONUS);
+			}
+		});
+	});
+}
+
 moneySuite('memory driver', memoryHarness);
+settleBetsSuite('memory driver', memoryHarness);
 describe.skipIf(!databaseUrl)('PostgresStore (integration)', () => {
 	moneySuite('postgres driver', postgresHarness);
+	settleBetsSuite('postgres driver', postgresHarness);
 });

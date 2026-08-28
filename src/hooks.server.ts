@@ -13,12 +13,20 @@
  * never slow or break request handling. Its `globalThis` guard makes the
  * dev-HMR re-execution of this module a no-op instead of a second scraper; the
  * `VITEST` guard keeps it out of the test run entirely.
+ *
+ * `startSettleScheduler()` is the same shape one task later: on weekdays between
+ * 15:43 and 17:00 IST it captures the official closes and settles the day,
+ * retrying every minute while an exchange is late. It is the only caller of the
+ * settlement engine in the request path; `settleNow` is the manual escape hatch a
+ * human uses on a stuck day (documented in the RUNBOOK, Task 16).
  */
 import type { Handle } from '@sveltejs/kit';
 import { startCasPoller } from '$lib/server/cas-poller';
+import { startSettleScheduler } from '$lib/server/settle/scheduler';
 import { resolveIdentity } from '$lib/server/auth/session';
 
 void startCasPoller();
+void startSettleScheduler();
 
 export const handle: Handle = async ({ event, resolve }) => {
 	const identity = await resolveIdentity(event);

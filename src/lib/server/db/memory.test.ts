@@ -628,5 +628,56 @@ describe('MemoryStore', () => {
 			expect(found.map((p) => p.handle)).toEqual(['arjun', 'priya']);
 			expect(await store.profiles.listProfilesByHandles([])).toEqual([]);
 		});
+
+		it('applyProfileProgress adds XP and stamps the streak as given', async () => {
+			const after = await store.profiles.applyProfileProgress('u1', {
+				xpDelta: 110,
+				streakDays: 4,
+				lastBetDate: DATE
+			});
+			expect(after).toMatchObject({ xp: 110, streakDays: 4, lastBetDate: DATE });
+
+			// The next day: XP accumulates, the streak is an absolute value.
+			const next = await store.profiles.applyProfileProgress('u1', {
+				xpDelta: 10,
+				streakDays: 5,
+				lastBetDate: '2026-08-28'
+			});
+			expect(next).toMatchObject({ xp: 120, streakDays: 5, lastBetDate: '2026-08-28' });
+			await expect(
+				store.profiles.applyProfileProgress('nobody', {
+					xpDelta: 1,
+					streakDays: 1,
+					lastBetDate: DATE
+				})
+			).rejects.toBeInstanceOf(NotFoundError);
+		});
+	});
+
+	// ------------------------------------------------- sessions: the claim guard
+
+	describe('sessions.setSessionStatusIf', () => {
+		it('moves a session only from an expected state, and reports whether it won', async () => {
+			const session = await store.sessions.ensureSession(DATE, CUTOFF);
+			expect(await store.sessions.setSessionStatusIf(session.id, 'settling', ['open'])).toBe(true);
+			expect((await store.sessions.getSessionByDate(DATE))?.status).toBe('settling');
+
+			// A second claim from 'open' loses — that is what stops two settle runs.
+			expect(await store.sessions.setSessionStatusIf(session.id, 'settled', ['open'])).toBe(false);
+			expect((await store.sessions.getSessionByDate(DATE))?.status).toBe('settling');
+
+			expect(await store.sessions.setSessionStatusIf(session.id, 'settled', ['settling'])).toBe(
+				true
+			);
+			expect((await store.sessions.getSessionByDate(DATE))?.status).toBe('settled');
+		});
+
+		it('accepts several expected states and answers false for an unknown session', async () => {
+			const session = await store.sessions.ensureSession(DATE, CUTOFF);
+			expect(
+				await store.sessions.setSessionStatusIf(session.id, 'settling', ['open', 'locked'])
+			).toBe(true);
+			expect(await store.sessions.setSessionStatusIf(9999, 'open', ['settling'])).toBe(false);
+		});
 	});
 });

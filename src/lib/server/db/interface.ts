@@ -36,8 +36,8 @@
  * });
  * ```
  *
- * `placeBet` is implemented (T7) as the shared body in ./money running inside
- * `tx()`; `settleBets` is still a throw-on-call placeholder (TODO(T9)).
+ * `placeBet` and `settleBets` are both implemented as the shared bodies in ./money
+ * running inside `tx()` — one implementation, two drivers.
  */
 import type {
 	Bet,
@@ -58,6 +58,9 @@ import type {
 	Underlying,
 	UserStats
 } from './types';
+// Type-only, so it does not close a runtime cycle: ./money owns the settlement tx
+// body and therefore owns its input/result shapes (the same seam as `placeBet`).
+import type { SettleBetsInput, SettleBetsResult } from './money';
 
 // ---------------------------------------------------------------------------
 // Errors — part of the contract, thrown identically by both drivers
@@ -149,6 +152,20 @@ export class BetExistsError extends DbError {
 // Domain groups
 // ---------------------------------------------------------------------------
 
+/**
+ * One settlement day's gamification write (T9). See
+ * {@link ProfileRepo.applyProfileProgress} for why `xpDelta` is a delta and the
+ * streak fields are not.
+ */
+export type ProfileProgress = {
+	/** XP to ADD to the profile (XP_PER_BET × settled + XP_PER_HIT × hits). */
+	xpDelta: number;
+	/** The streak count as it should now stand (continues, resets, or starts at 1). */
+	streakDays: number;
+	/** The IST trade date to stamp as the user's last betting day. */
+	lastBetDate: string;
+};
+
 /** daily_sessions — the trading-day state machine. */
 export type SessionRepo = {
 	/**
@@ -160,6 +177,18 @@ export type SessionRepo = {
 	getSessionByDate(tradeDate: string): Promise<DailySession | null>;
 	getSessionById(sessionId: number): Promise<DailySession | null>;
 	setSessionStatus(sessionId: number, status: SessionStatus): Promise<void>;
+	/**
+	 * Conditional status write — the settlement engine's re-entry guard. Moves the
+	 * session to `status` ONLY when it currently sits in one of `expected`, and
+	 * reports whether the write won. One UPDATE with the expected state in the WHERE,
+	 * so two overlapping runs cannot both claim a day: the loser reads `false` and
+	 * backs off. `false` also covers a session id that no longer exists.
+	 */
+	setSessionStatusIf(
+		sessionId: number,
+		status: SessionStatus,
+		expected: readonly SessionStatus[]
+	): Promise<boolean>;
 };
 
 export type ProfileRepo = {
@@ -183,6 +212,17 @@ export type ProfileRepo = {
 	 * Returns the updated profile so the caller can stamp `ledger.balanceAfter`.
 	 */
 	applyBalanceDelta(userId: string, delta: number): Promise<Profile>;
+	/**
+	 * The settlement side of gamification (T9): XP accrual and the streak flame.
+	 * Call it inside `tx()` after `lockForUpdate`, having computed the next streak
+	 * from the row you just read.
+	 *
+	 * `xpDelta` is a DELTA (it accrues per settled bet); `streakDays` and
+	 * `lastBetDate` are ABSOLUTE — a streak resets as well as continues, so "add 1"
+	 * is not expressible. This asymmetry is deliberate and is why the type is not a
+	 * plain signed delta like {@link StatsDelta}.
+	 */
+	applyProfileProgress(userId: string, next: ProfileProgress): Promise<Profile>;
 };
 
 export type BetRepo = {
@@ -321,11 +361,10 @@ export type GameStore = TxStore & {
 	close(): Promise<void>;
 
 	// -------------------------------------------------------------------------
-	// Money operations — TODO(T7) / TODO(T9)
+	// Money operations
 	// -------------------------------------------------------------------------
-	// These two are declared now so the money tasks cannot silently redesign the
-	// seam. Both MUST be implemented as a single `this.tx(...)` (see the example on
-	// this interface); both currently throw.
+	// The two money paths, both implemented as a single `this.tx(...)` running the
+	// shared bodies in ./money (see the example on this interface).
 
 	/**
 	 * T7 — the placement money path, one atomic unit (see `placeBetInTx` in ./money,
@@ -359,23 +398,22 @@ export type GameStore = TxStore & {
 	}): Promise<Bet>;
 
 	/**
-	 * TODO(T9) — `src/lib/server/settle.ts`. One transaction (per chunk of bets):
-	 * mark bets settled, credit wallets with `lockForUpdate`, write payout/refund
-	 * ledger rows (payout-once), bump `daily_pots.total_paid_out` + `user_stats`.
-	 * Idempotent: re-running with the same outcomes is a no-op.
+	 * T9 — the settlement money path: ONE transaction per chunk of bets
+	 * (`settleBetsInTx` in ./money, the shared body both drivers run). Per bet,
+	 * and only when the bet is still unsettled:
+	 *
+	 *   • mark it settled (`settlement_tier`, `payout`, `settled_at`)
+	 *   • `hit`   → credit `payout`, one `payout` ledger row — the partial unique
+	 *               index `ledger_payout_once` makes a second payment for the same
+	 *               bet impossible, across re-runs as well as crashes
+	 *   • `flat`  → credit the stake back, one `refund` ledger row
+	 *   • `miss`  → no credit and NO ledger row (the stake left at placement)
+	 *   • `daily_pots.total_paid_out` + `user_stats` move in the same unit of work
+	 *
+	 * The tier and the payout are decided by the service (`$lib/server/settle`) from
+	 * the official close; this method only moves money and refuses to move it twice.
+	 * Anything already settled is counted in `skipped` and left untouched, so a
+	 * re-run after a crash is a numerical no-op.
 	 */
-	settleBets(input: {
-		sessionId: number;
-		tradeDate: string;
-		outcomes: { betId: string; userId: string; stake: number; odds: number }[];
-	}): Promise<{ settled: number; skipped: number }>;
+	settleBets(input: SettleBetsInput): Promise<SettleBetsResult>;
 };
-
-/** Shared throw-on-call body for the money operations still to come. */
-export function moneyOpNotImplemented(op: 'settleBets'): never {
-	throw new DbError(
-		`GameStore.${op} is not implemented yet — it lands in T9 (settlement). ` +
-			'Until then, compose the same steps yourself inside store.tx().',
-		'NOT_IMPLEMENTED'
-	);
-}

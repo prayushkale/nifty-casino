@@ -128,6 +128,40 @@ describe('getLadderForDate', () => {
 		expect((await getLadderForDate(store, THURSDAY)).anchors.nifty).toBe(25_000);
 	});
 
+	it('never anchors a day on its own official close (the T9 regression)', async () => {
+		// Once settlement lands today's official close it sits in the same table the
+		// ladder reads. It is a CLOSE, not a previous-day anchor: anchoring on it
+		// would make every Δ zero and refund the entire day.
+		const store = new MemoryStore();
+		await seedCloses(store, WEDNESDAY, LAUNCH_ANCHORS, 'official');
+		await seedCloses(
+			store,
+			THURSDAY,
+			{ nifty: 25_050, banknifty: 56_010, sensex: 82_600 },
+			'official'
+		);
+
+		expect((await getLadderForDate(store, THURSDAY)).anchors).toEqual(LAUNCH_ANCHORS);
+	});
+
+	it('still falls back to today’s own row after the walk-back finds nothing', async () => {
+		// First trading day of a deployment: no previous day at all, but the poller
+		// has already written the feed's prevClose for today.
+		const store = new MemoryStore();
+		await seedCloses(store, THURSDAY, LAUNCH_ANCHORS, 'live_approx');
+		expect((await getLadderForDate(store, THURSDAY)).anchors).toEqual(LAUNCH_ANCHORS);
+
+		// …whereas today's OFFICIAL close is never mistaken for one.
+		invalidateLadderCache();
+		const settled = new MemoryStore();
+		await seedCloses(settled, THURSDAY, LAUNCH_ANCHORS, 'official');
+		expect((await getLadderForDate(settled, THURSDAY)).anchors).toEqual({
+			nifty: null,
+			banknifty: null,
+			sensex: null
+		});
+	});
+
 	it('yields options for the anchored indices only, and never throws', async () => {
 		const store = new MemoryStore();
 		await seedCloses(store, WEDNESDAY, { nifty: 25_000 }); // banknifty + sensex dark

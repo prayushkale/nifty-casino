@@ -37,7 +37,13 @@ import {
 	type TxStore
 } from './interface';
 import { Mutex } from './mutex';
-import { placeBetInTx, type PlaceBetInput } from './money';
+import {
+	placeBetInTx,
+	settleBetsInTx,
+	type PlaceBetInput,
+	type SettleBetsInput,
+	type SettleBetsResult
+} from './money';
 import type {
 	Bet,
 	CasTickRow,
@@ -135,6 +141,16 @@ export class MemoryStore implements GameStore {
 			const session = await this.sessionRepo.getSessionById(sessionId);
 			if (!session) throw new NotFoundError(`session ${sessionId}`);
 			session.status = status;
+		},
+		// The tx mutex serializes tx bodies and this body awaits nothing before the
+		// check-and-set, so the conditional update is atomic here the way a single
+		// `UPDATE … WHERE status = any(...)` is in Postgres.
+		setSessionStatusIf: async (sessionId, status, expected) => {
+			const session = await this.sessionRepo.getSessionById(sessionId);
+			if (!session) return false;
+			if (!(expected as readonly string[]).includes(session.status)) return false;
+			session.status = status;
+			return true;
 		}
 	};
 
@@ -201,6 +217,16 @@ export class MemoryStore implements GameStore {
 				throw new InsufficientFundsError(userId, -delta, profile.balance);
 			}
 			profile.balance += delta;
+			return profile;
+		},
+		// Settlement's gamification write (T9). `xpDelta` accumulates, the streak
+		// fields are absolutes — see the interface note on ProfileProgress.
+		applyProfileProgress: async (userId, next) => {
+			const profile = this.profilesById.get(userId);
+			if (!profile) throw new NotFoundError(`profile ${userId}`);
+			profile.xp += next.xpDelta;
+			profile.streakDays = next.streakDays;
+			profile.lastBetDate = next.lastBetDate;
 			return profile;
 		}
 	};
@@ -510,21 +536,14 @@ export class MemoryStore implements GameStore {
 		return Promise.resolve();
 	}
 
-	// The money path is the shared body in ./money running as ONE transaction —
+	// The money paths are the shared bodies in ./money running as ONE transaction —
 	// the memory driver differs from Postgres only in how `tx()` is implemented.
 	placeBet(input: PlaceBetInput): Promise<Bet> {
 		return this.tx((t) => placeBetInTx(t, input));
 	}
 
-	async settleBets(): Promise<{ settled: number; skipped: number }> {
-		throw this.notYet('settleBets');
-	}
-
-	private notYet(op: 'settleBets'): DbError {
-		return new DbError(
-			`MemoryStore.${op} is a TODO(T9) placeholder — compose the steps inside store.tx() for now.`,
-			'NOT_IMPLEMENTED'
-		);
+	settleBets(input: SettleBetsInput): Promise<SettleBetsResult> {
+		return this.tx((t) => settleBetsInTx(t, input));
 	}
 
 	/** The same repos; exposed as a distinct type so callers cannot confuse it with the root. */
