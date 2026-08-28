@@ -398,6 +398,13 @@ export class MemoryStore implements GameStore {
 		upsertIndexClose: async (close) => {
 			this.closesByKey.set(tickKey(close.tradeDate, close.underlying), { ...close });
 		},
+		// First write wins — the memory twin of `on conflict do nothing`.
+		upsertIndexCloseIfAbsent: async (close) => {
+			const key = tickKey(close.tradeDate, close.underlying);
+			if (this.closesByKey.has(key)) return false;
+			this.closesByKey.set(key, { ...close });
+			return true;
+		},
 		getIndexCloses: async (tradeDate) =>
 			[...this.closesByKey.values()]
 				.filter((c) => c.tradeDate === tradeDate)

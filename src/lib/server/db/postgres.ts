@@ -649,6 +649,16 @@ function createRepos(sql: SqlClient): TxStore {
 					close = excluded.close,
 					source = excluded.source`;
 		},
+		// The poller's anchor path: an existing row (live_approx OR official) wins, so
+		// re-running a poll can never rewrite the day's anchor.
+		upsertIndexCloseIfAbsent: async (close) => {
+			const rows = await sql`
+				insert into index_closes (trade_date, underlying, close, source)
+				values (${close.tradeDate}, ${close.underlying}, ${close.close}, ${close.source})
+				on conflict (trade_date, underlying) do nothing
+				returning underlying`;
+			return rows.length > 0;
+		},
 		getIndexCloses: async (tradeDate) => {
 			const rows =
 				await sql`select * from index_closes where trade_date = ${tradeDate} order by underlying asc`;

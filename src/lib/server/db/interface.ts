@@ -228,6 +228,21 @@ export type CloseRepo = {
 		close: number;
 		source: CloseSource;
 	}): Promise<void>;
+	/**
+	 * Write a close only when the (trade_date, underlying) row does not exist yet.
+	 * Returns whether the row was written.
+	 *
+	 * This is the poller's anchor path: the first live `prevClose` of a trading day
+	 * seeds `index_closes` as `live_approx`, and re-running the poll (or restarting
+	 * the server mid-day) must not keep rewriting it — the day's `official` close
+	 * lands later via {@link upsertIndexClose} and then wins for good.
+	 */
+	upsertIndexCloseIfAbsent(close: {
+		tradeDate: string;
+		underlying: Underlying;
+		close: number;
+		source: CloseSource;
+	}): Promise<boolean>;
 	getIndexCloses(tradeDate: string): Promise<IndexClose[]>;
 	/** The previous trading day's official close — the anchor every bet ladder hangs off. */
 	getLatestCloseBefore(tradeDate: string, underlying: Underlying): Promise<IndexClose | null>;

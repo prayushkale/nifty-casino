@@ -564,6 +564,28 @@ describe('MemoryStore', () => {
 		it('returns null when there is no anchor yet (first trading day)', async () => {
 			expect(await store.closes.getLatestCloseBefore('2026-01-01', 'sensex')).toBeNull();
 		});
+
+		it('writes a close only when the day has no row yet (the poller anchor path)', async () => {
+			const input = {
+				tradeDate: DATE,
+				underlying: 'sensex' as const,
+				close: 82110,
+				source: 'live_approx' as const
+			};
+			await expect(store.closes.upsertIndexCloseIfAbsent(input)).resolves.toBe(true);
+			// a second poll of the same day must not rewrite it (idempotent restart)
+			await expect(store.closes.upsertIndexCloseIfAbsent({ ...input, close: 82999 })).resolves.toBe(
+				false
+			);
+			expect(await store.closes.getIndexCloses(DATE)).toEqual([
+				{ tradeDate: DATE, underlying: 'sensex', close: 82110, source: 'live_approx' }
+			]);
+			// the official close lands later via the plain upsert and wins
+			await store.closes.upsertIndexClose({ ...input, close: 82250, source: 'official' });
+			expect(await store.closes.getIndexCloses(DATE)).toEqual([
+				{ tradeDate: DATE, underlying: 'sensex', close: 82250, source: 'official' }
+			]);
+		});
 	});
 
 	// -------------------------------------------------------------- profiles

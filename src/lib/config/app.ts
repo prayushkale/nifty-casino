@@ -30,6 +30,13 @@ export const SSE_HEARTBEAT_MS = 15_000;
 /** Hot ring buffer size per underlying (~48 min of ticks @4s). */
 export const RING_BUFFER_CAP = 720;
 
+/**
+ * A feed is "stale" when the newest tick is older than this while the auction is
+ * live — drives the client staleness banner (Task 12). Upstream polls at 4s, so
+ * three missed polls is the threshold before a user should be told.
+ */
+export const CAS_STALE_MS = 12_000;
+
 /** Minimum/maximum stake per bet (NC chips). */
 export const MIN_STAKE = 10;
 export const MAX_STAKE = 100_000;
