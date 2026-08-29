@@ -44,6 +44,50 @@ export const RING_BUFFER_CAP = 720;
  */
 export const CAS_STALE_MS = 12_000;
 
+/**
+ * Client cadence for the REST fallback (`GET /api/cas/all`) used only when the
+ * SSE stream is unusable (see {@link SSE_FALLBACK_WINDOW_MS}). Deliberately no
+ * faster than the 4s upstream poll and no slower than the tick a player can
+ * notice — and it is a FALLBACK: an SSE client costs the origin one snapshot per
+ * reconnect, a polling client one snapshot every one of these.
+ */
+export const CAS_FALLBACK_POLL_MS = 8000;
+
+/**
+ * Two `EventSource` errors inside this window means the stream is not coming
+ * back on its own (a proxy buffering `text/event-stream`, a broken middle box)
+ * and the client switches to {@link CAS_FALLBACK_POLL_MS} polling for the rest of the
+ * session. One error alone is normal — a server restart, a phone locking — and
+ * EventSource heals it with `Last-Event-ID` resumption for free.
+ */
+export const SSE_FALLBACK_WINDOW_MS = 30_000;
+
+/**
+ * How often the game page re-reads `/api/state` while the day is locked and
+ * unsettled, to pick up the official close and the settlement verdicts. Slow on
+ * purpose: settlement is a ~15:43 server job, and a player staring at "awaiting
+ * official close" gains nothing from a 1s poll of a table that has not changed.
+ */
+export const CLIENT_SETTLE_POLL_MS = 30_000;
+
+/**
+ * COSMETIC INTERPOLATION — PLAN §6 open question 5, deliberately OFF.
+ *
+ * Prayush's call to make, and the default is the honest one: the upstream feed is
+ * a 4s point sample (PLAN §1 "tick-rate reality"), so anything between two ticks
+ * is a drawing, not a measurement. While this is `false` the charts render a
+ * *stepped* line (`LineType.WithSteps`), which holds each tick flat until the next
+ * one arrives — every pixel on the chart is a number the exchange actually sent.
+ *
+ * Turning this on would switch the same data to `LineType.Simple` (sloped
+ * segments), which reads smoother and moves a bet's target line under the cursor
+ * sooner, and it would be a lie about when the move happened. No interpolation
+ * code exists yet: this flag is the off-switch's placeholder, and the switch is
+ * the single `lineType` read in `CasChart.svelte`. Do not flip it without the EV
+ * and UX conversation the open question asks for.
+ */
+export const COSMETIC_INTERPOLATION = false as const;
+
 /** Minimum/maximum stake per bet (NC chips). */
 export const MIN_STAKE = 10;
 export const MAX_STAKE = 100_000;

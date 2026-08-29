@@ -1,29 +1,33 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { get } from 'svelte/store';
 	import type { PageData } from './$types';
-	import { AUCTION_START_HMS, CUTOFF_HMS, SIGNUP_BONUS } from '$lib/config/app';
+	import {
+		AUCTION_START_HMS,
+		CLIENT_SETTLE_POLL_MS,
+		CUTOFF_HMS,
+		SIGNUP_BONUS
+	} from '$lib/config/app';
 	import { LADDER_UNDERLYINGS, type LadderUnderlying } from '$lib/config/ladder';
 	import type { StatePayload } from '$lib/server/state';
+	import CasChart from '$lib/components/game/CasChart.svelte';
+	import FeedStatusBanner from '$lib/components/game/FeedStatusBanner.svelte';
 	import IndexCard from '$lib/components/game/IndexCard.svelte';
 	import MyBetsStrip from '$lib/components/game/MyBetsStrip.svelte';
 	import PhaseBanner from '$lib/components/game/PhaseBanner.svelte';
 	import {
 		bettingPhase,
 		casLatest,
-		fetchCasLatest,
 		formatNC,
 		gameState,
 		INDEX_LABELS,
-		isLivePhase,
 		loadState,
 		seedState,
-		startCasPolling,
 		startClock,
 		stateError,
-		nowIst,
-		driftOffsetMs
+		nowIst
 	} from '$lib/stores/game';
+	import type { GamePhase } from '$lib/stores/game';
+	import { casStream, startCasStream, resyncCasStream } from '$lib/stores/casStream';
 
 	/**
 	 * The floor (PLAN §4). Desktop: three index cards and the bets strip, then the
@@ -36,8 +40,10 @@
 	 *     is then replaced by the store's, which is what every action refreshes.
 	 *   • `now` is the drift-corrected ticker, so every phase and countdown on this
 	 *     page is judged on the server's clock.
-	 *   • the live value line polls `/api/cas/all` every 8s while the day is live;
-	 *     SSE takes over in T12.
+	 *   • the live line is SSE-first (`/api/stream` via `casStream`), with the 8s
+	 *     `/api/cas/all` poll kept only as the stream module's own fallback. Both
+	 *     paths write the same `casLatest` store, so the cards and the charts read
+	 *     one number.
 	 */
 	export let data: PageData;
 
@@ -54,6 +60,7 @@
 	$: myBets = state.myBets;
 	$: anchors = state.ladder.anchors;
 	$: latest = $casLatest;
+	$: stream = $casStream;
 	$: cutoffLabel = `${CUTOFF_HMS.h}:${String(CUTOFF_HMS.m).padStart(2, '0')} IST`;
 	$: auctionLabel = `${AUCTION_START_HMS.h}:${String(AUCTION_START_HMS.m).padStart(2, '0')}:${String(
 		AUCTION_START_HMS.s
@@ -62,6 +69,26 @@
 	/** Desktop shows every card at once; mobile keeps one bet form open. */
 	$: expandedFor = (underlying: LadderUnderlying): boolean =>
 		isDesktop ? true : underlying === expandedUnderlying;
+
+	/**
+	 * The 30s settle poll (PLAN §5 T12): while the day is locked and not yet paid
+	 * out, re-read `/api/state` for the official close and the verdicts. One interval
+	 * for the whole page, not one per chart — three charts would mean three timers
+	 * asking the same question. Cleared the moment the phase leaves `locked`.
+	 */
+	let settleTimer: ReturnType<typeof setInterval> | null = null;
+
+	function syncSettlePoll(currentPhase: GamePhase, settled: boolean): void {
+		const wanted = currentPhase === 'locked' && !settled;
+		if (wanted && settleTimer === null) {
+			settleTimer = setInterval(() => void loadState(), CLIENT_SETTLE_POLL_MS);
+		} else if (!wanted && settleTimer !== null) {
+			clearInterval(settleTimer);
+			settleTimer = null;
+		}
+	}
+
+	$: if (typeof window !== 'undefined') syncSettlePoll(phase, state.session.settled);
 
 	function toggleCard(underlying: LadderUnderlying): void {
 		if (isDesktop) return; // everything is already open
@@ -79,6 +106,10 @@
 		seedState(data.state);
 		const stopClock = startClock();
 
+		// The live feed. SSE with a REST snapshot for hydration, gap-fill and
+		// fallback — the page never polls directly.
+		const stopStream = startCasStream();
+
 		// Accordion only below `md`, where the three cards cannot share a screen.
 		const mq = window.matchMedia('(min-width: 768px)');
 		const apply = (): void => {
@@ -88,26 +119,21 @@
 		apply();
 		mq.addEventListener('change', apply);
 
-		// Live indicative values, 8s, gated on the phase — no SSE yet (T12 owns it),
-		// and no polling of a board that is closed anyway.
-		const stopPoll = startCasPolling(8000, () => {
-			const current = get(gameState);
-			if (!current) return false;
-			return isLivePhase(bettingPhase(current, Date.now() + get(driftOffsetMs)));
-		});
-
 		// A failed re-read (the tab slept, the network blipped) is worth one retry
 		// when the player comes back, since every number here is the server's.
+		// `resyncCasStream` is the tick-side version of the same idea.
 		const onVisible = (): void => {
 			if (document.visibilityState !== 'visible') return;
 			void loadState();
-			void fetchCasLatest();
+			void resyncCasStream();
 		};
 		document.addEventListener('visibilitychange', onVisible);
 
 		return () => {
 			stopClock();
-			stopPoll();
+			stopStream();
+			if (settleTimer !== null) clearInterval(settleTimer);
+			settleTimer = null;
 			mq.removeEventListener('change', apply);
 			document.removeEventListener('visibilitychange', onVisible);
 		};
@@ -220,7 +246,7 @@
 		{/each}
 	</section>
 
-	<!-- ── live charts — shells until T12 lights them up ───────────────────────── -->
+	<!-- ── live charts — auction mode (PLAN §4): three cards, target lines, previews ── -->
 	<section class="flex flex-col gap-3" aria-label="Live auction charts">
 		<header class="flex flex-wrap items-baseline justify-between gap-2">
 			<h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-400">Live charts</h2>
@@ -228,37 +254,19 @@
 				auction mode from {auctionLabel} · cutoff {cutoffLabel}
 			</p>
 		</header>
+		<FeedStatusBanner />
+		<!-- 3-across on desktop (§4); full-width stacked below `md`, 320px-safe either way. -->
 		<div class="grid grid-cols-1 gap-4 md:grid-cols-3">
 			{#each LADDER_UNDERLYINGS as underlying (underlying)}
-				<div
-					class="flex min-h-[168px] flex-col justify-between rounded-xl border border-felt-700 bg-felt-900/60 p-4"
-				>
-					<div class="flex items-baseline justify-between gap-2">
-						<span class="text-xs font-bold uppercase tracking-widest text-zinc-300">
-							{INDEX_LABELS[underlying]}
-						</span>
-						<span class="num text-sm text-zinc-500">
-							{latest[underlying] ? formatNC(latest[underlying]?.value ?? 0) : '—'}
-						</span>
-					</div>
-					<!-- 320px-safe by construction: no canvas yet, so nothing can overflow. -->
-					<div
-						class="my-3 flex flex-1 items-center justify-center rounded-lg border border-dashed border-felt-700 px-3 py-6 text-center"
-					>
-						<p class="text-[11px] leading-relaxed text-zinc-600">
-							{#if phase === 'pre'}
-								Charts go live {auctionLabel} — the auction's first indicative ticks.
-							{:else if isLivePhase(phase)}
-								Auction running — the live line lands here with the SSE feed.
-							{:else if phase === 'closed-weekend'}
-								Market closed. Charts replay here on the next trading day.
-							{:else}
-								Today's auction is finished. Charts replay here after settlement.
-							{/if}
-						</p>
-					</div>
-					<p class="num text-[11px] text-zinc-700">target lines + payout preview · T12</p>
-				</div>
+				<CasChart
+					{underlying}
+					label={INDEX_LABELS[underlying]}
+					ticks={stream.series[underlying]}
+					latest={latest[underlying]}
+					anchor={anchors[underlying]}
+					myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
+					{phase}
+				/>
 			{/each}
 		</div>
 	</section>

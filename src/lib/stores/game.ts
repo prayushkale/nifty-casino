@@ -332,6 +332,20 @@ function applyState(payload: StatePayload): void {
 }
 
 /**
+ * Re-measure the clock offset from a bare `serverNow` epoch ms — no payload.
+ *
+ * The live CAS feed refreshes this every time a `hello`/snapshot lands, because a
+ * player can sit on the game page for an hour and a phone that drifts (or a tab
+ * the OS throttled) must not shift the cutoff or the staleness maths. T12's only
+ * addition to this module: everything else about the clock stays here.
+ */
+export function syncServerClock(serverNowMs: number): void {
+	if (!Number.isFinite(serverNowMs)) return;
+	driftOffsetMs.set(serverNowMs - Date.now());
+	tickClock();
+}
+
+/**
  * `GET /api/state` — the one-request screen rebuild. Every mutation ends with
  * this, and so does a cold page that was not seeded from `load`.
  */
@@ -406,9 +420,11 @@ export async function fetchCasLatest(): Promise<CasLatestByIndex | null> {
  * live window, which is what keeps a tab sitting on the game page overnight from
  * ticking all night.
  *
- * Kept here rather than in a component so the one SSE-less polling cadence of T11
- * has a single home — T12 replaces the body with an SSE subscription and keeps the
- * callers.
+ * T12 NOTE: this is no longer the game page's primary feed — `$lib/stores/casStream`
+ * subscribes to `/api/stream` and only falls back to this when `EventSource` has
+ * failed twice inside 30s (a proxy eating `text/event-stream`). It stays here,
+ * rather than moving into the stream module, so the polling cadence keeps exactly
+ * one home and the stream module stays testable without it.
  */
 export function startCasPolling(
 	intervalMs = 8000,
