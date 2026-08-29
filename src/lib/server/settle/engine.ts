@@ -4,7 +4,8 @@
  *
  * Division of labour:
  *
- *   ../settle/tier     — the rulebook: `computeTier`/`payoutFor` decide a bet's fate
+ *   $lib/game/tier     — the rulebook: `computeTier`/`payoutFor` decide a bet's fate
+ *                          (shared with the browser's payout preview — see its header)
  *   ../settle/capture  — how an official close gets into `index_closes` (the scheduler calls it)
  *   THIS module        — the orchestration: which bets, against which closes, in
  *                        which transactions, and what happens when a close is missing
@@ -37,7 +38,7 @@ import { isWeekend, shiftIstDate } from '$lib/time/ist';
 import { getLadderForDate, invalidateLadderCache } from '$lib/server/ladder';
 import type { GameStore } from '$lib/server/db';
 import type { Underlying } from '$lib/server/db/types';
-import { computeTier, payoutFor, type PayableTier } from './tier';
+import { computeTier, payoutFor, type PayableTier } from '$lib/game/tier';
 
 /** How many calendar days back a streak (or an anchor) may look for a trading day. */
 export const SETTLE_MAX_LOOKBACK_DAYS = 10;

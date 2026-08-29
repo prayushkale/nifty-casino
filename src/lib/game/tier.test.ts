@@ -6,6 +6,9 @@
  * dead-zone edge (exclusive — exactly half a step is a real move), wrong-direction
  * full loss, and the abstain guard that keeps a day with a broken anchor from
  * settling at all. Pure module, zero setup.
+ *
+ * The same arithmetic is what the game page previews (T11), so a change here is a
+ * change to what players were told they would win — treat it as a money change.
  */
 import { describe, expect, it } from 'vitest';
 import { LADDER_CONFIG, LADDER_UNDERLYINGS, type LadderUnderlying } from '$lib/config/ladder';

@@ -1,6 +1,14 @@
 /**
  * `computeTier` + `payoutFor` — the casino's rulebook (PLAN §0.2).
  *
+ * ONE ARITHMETIC, TWO CONSUMERS. This file is the SHARED RULEBOOK: the server's
+ * settlement engine (`$lib/server/settle/engine`) decides real money with it, and
+ * the game page's "if it closed right now" strip (T11) previews the very same
+ * verdicts with it. That is why it lives in `$lib/game/` and not under
+ * `$lib/server/` — SvelteKit refuses to let browser code import a server module,
+ * and a payout preview that disagreed with the payout engine would be a worse bug
+ * than either one being wrong. Do not move it back, and do not fork the maths.
+ *
  * PURE. No I/O, no clock, no store, no fetchers: this module is the one place the
  * words "hit", "flat" and "miss" are given arithmetic, so it must stay importable
  * from a test with no database and from the browser's payout-preview strip. It
