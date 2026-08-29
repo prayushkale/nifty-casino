@@ -39,6 +39,7 @@
  * `placeBet` and `settleBets` are both implemented as the shared bodies in ./money
  * running inside `tx()` — one implementation, two drivers.
  */
+import { MAX_LEADERBOARD_ROWS } from '$lib/config/app';
 import type {
 	Bet,
 	CasTickRow,
@@ -55,6 +56,7 @@ import type {
 	SessionStatus,
 	SettlementTier,
 	StatsDelta,
+	TargetKind,
 	Underlying,
 	UserStats
 } from './types';
@@ -166,6 +168,86 @@ export type ProfileProgress = {
 	lastBetDate: string;
 };
 
+// ---------------------------------------------------------------------------
+// Leaderboard / history readers (T14)
+//
+// Every one of these is a bounded, read-only projection over COLUMNS THAT ARE
+// ALREADY PRECOMPUTED — `profiles.balance`, `profiles.streak_days`,
+// `user_stats.bets_won`, `bets.payout`. That is what keeps them inside the PLAN
+// §3 doctrine: no `SUM`/`COUNT` over `bets` anywhere in a read path, so a
+// leaderboard costs the same at 10 users as at 10 lakh. The ordering keys are
+// ordinary indexed columns; the limit is the bound.
+// ---------------------------------------------------------------------------
+
+/** One row of the 🏆 top-balances board — a `profiles` row joined to its `user_stats`. */
+export type TopBalanceRow = {
+	/** The public identity. A leaderboard never carries an email or a user id. */
+	handle: string;
+	/** Live wallet, whole NC chips. */
+	balance: number;
+	xp: number;
+	streakDays: number;
+	/** All-time counters from `user_stats` — precomputed at bet/settle time, never aggregated here. */
+	betsPlaced: number;
+	betsWon: number;
+};
+
+/** One row of the 🔥 longest-streaks board — `profiles` where `streak_days > 0`. */
+export type TopStreakRow = {
+	handle: string;
+	streakDays: number;
+	/** Carried so the UI can badge the row with the XP-derived rank (`$lib/config/ranks`). */
+	xp: number;
+};
+
+/** One row of the ⚡ biggest-calls board — the day's settled bets by payout. */
+export type TopWinRow = {
+	handle: string;
+	underlying: Underlying;
+	targetKind: TargetKind;
+	/** The round-number move the player called, in points (sign lives in {@link targetKind}). */
+	deltaPoints: number;
+	stake: number;
+	/** Total credited back — `stake × odds` for a hit, `stake` for a flat, 0 for a miss. */
+	payout: number;
+	/** Multiplier frozen at bet time. */
+	odds: number;
+	/** Always present: only settled bets are ranked. */
+	settlementTier: SettlementTier;
+};
+
+/** Cursor options for {@link BetRepo.listBetsForUserPage}. */
+export type BetPageOptions = {
+	/**
+	 * epoch ms — only rows PLACED STRICTLY BEFORE this instant. The cursor is the
+	 * `created_at` of the last row of the previous page; the HTTP edge carries it
+	 * as an ISO string (`?before=`) and converts.
+	 */
+	beforeCreatedAt?: number;
+	/**
+	 * Keyset tie-break for the rows that share {@link beforeCreatedAt} to the
+	 * millisecond. Without it, two same-instant bets straddling a page boundary
+	 * would skip one on the next page; `id` (uuid) breaks the tie and makes the
+	 * walk lossless.
+	 */
+	beforeId?: string;
+	/**
+	 * Caller-capped, never defaulted — a page endpoint states its own bound, the
+	 * same rule {@link BetRepo.listRecentSettledBets} follows.
+	 */
+	limit: number;
+};
+
+/**
+ * The single clamp every leaderboard read runs through. A negative or
+ * non-integer limit reads as 0 (a caller that cannot state a bound gets nothing
+ * rather than everything), and nothing can exceed {@link MAX_LEADERBOARD_ROWS} —
+ * the documented product cap, identical in both drivers.
+ */
+export function leaderboardLimit(limit: number): number {
+	return Math.min(Math.max(0, Math.trunc(limit)), MAX_LEADERBOARD_ROWS);
+}
+
 /** daily_sessions — the trading-day state machine. */
 export type SessionRepo = {
 	/**
@@ -223,6 +305,28 @@ export type ProfileRepo = {
 	 * plain signed delta like {@link StatsDelta}.
 	 */
 	applyProfileProgress(userId: string, next: ProfileProgress): Promise<Profile>;
+	/**
+	 * 🏆 Top balances (T14) — `profiles` joined to `user_stats`, richest first.
+	 *
+	 * Ordering is deterministic all the way down: `balance desc`, then `xp desc`,
+	 * then `handle asc`, so two wallets of equal size always render in the same
+	 * order on every node and every re-render. A profile with no `user_stats` row
+	 * yet (nobody has settled anything for it) is NOT dropped — its counters read
+	 * 0, because "has chips but has not played" is a real leaderboard state.
+	 *
+	 * Capped by {@link leaderboardLimit}; the balance column is the precomputed
+	 * wallet, so this is one indexed sort over `profiles`, never an aggregate.
+	 */
+	listTopBalances(limit: number): Promise<TopBalanceRow[]>;
+	/**
+	 * 🔥 Longest streaks (T14) — `profiles` with `streak_days > 0`, longest first.
+	 *
+	 * Zero-streak rows are excluded rather than zero-padded: a player who has not
+	 * bet yet has no streak to rank, and the section renders an empty state instead
+	 * of 100 rows of "0 days". Tie-break `xp desc, handle asc` for the same reason
+	 * as {@link listTopBalances}.
+	 */
+	listTopStreaks(limit: number): Promise<TopStreakRow[]>;
 };
 
 export type BetRepo = {
@@ -240,6 +344,33 @@ export type BetRepo = {
 	 * own bound rather than inherit one from the driver.
 	 */
 	listRecentSettledBets(userId: string, limit: number): Promise<Bet[]>;
+	/**
+	 * ⚡ Today's biggest calls (T14) — the settled bets of ONE trade date, biggest
+	 * payout first, joined to `profiles` so the row names a player.
+	 *
+	 * "Of that date" means the bet's SESSION carries the trade date (`session_id →
+	 * daily_sessions.trade_date`), not `settled_at::date`: a day settles once at
+	 * ~15:43, so the two coincide in practice, but the session is the fact the
+	 * product means by "today's calls" and it survives a re-settle or a late
+	 * capture past midnight IST.
+	 *
+	 * Ties are broken by `handle asc, id asc` — deterministic across nodes and
+	 * stable across re-reads, which a "top calls" strip needs if two players cash
+	 * the identical payout. A bet whose profile row has vanished is skipped (the
+	 * join drops it): an ownerless bet cannot be named on a public board.
+	 */
+	listTopWinsForDate(tradeDate: string, limit: number): Promise<TopWinRow[]>;
+	/**
+	 * The player's OWN bet log, one page at a time (T14 `/history`). Unlike
+	 * {@link listRecentSettledBets} this is every status — live bets are the
+	 * interesting rows on your own history, and only a public page has to hide them.
+	 *
+	 * Newest first (`created_at desc, id desc`), caller-capped, and cursor-keyed by
+	 * {@link BetPageOptions.beforeCreatedAt} (+ {@link BetPageOptions.beforeId}) so
+	 * "Load more" is a keyset walk and never re-sends or skips a row as the table
+	 * grows underneath it. `limit` has no default, same as the other readers here.
+	 */
+	listBetsForUserPage(userId: string, options: BetPageOptions): Promise<Bet[]>;
 	/** Settlement scan — the settlement engine iterates a session's bets in chunks. */
 	listBetsForSession(sessionId: number): Promise<Bet[]>;
 	/**

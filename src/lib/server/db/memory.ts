@@ -25,6 +25,8 @@ import {
 	DuplicatePayoutError,
 	InsufficientFundsError,
 	NotFoundError,
+	leaderboardLimit,
+	type BetPageOptions,
 	type BetRepo,
 	type CloseRepo,
 	type GameStore,
@@ -34,6 +36,9 @@ import {
 	type SessionRepo,
 	type StatsRepo,
 	type TickRepo,
+	type TopBalanceRow,
+	type TopStreakRow,
+	type TopWinRow,
 	type TxStore
 } from './interface';
 import { Mutex } from './mutex';
@@ -73,6 +78,31 @@ const byCreatedThenId = (a: Bet, b: Bet): number =>
  */
 const bySettledDesc = (a: Bet, b: Bet): number =>
 	(b.settledAt ?? 0) - (a.settledAt ?? 0) || b.createdAt - a.createdAt || b.id.localeCompare(a.id);
+
+/**
+ * Newest first — the exact inverse of {@link byCreatedThenId}, and the order
+ * {@link BetRepo.listBetsForUserPage} promises the /history page. The id breaks
+ * same-instant ties the same way the Postgres keyset cursor does.
+ */
+const byCreatedDesc = (a: Bet, b: Bet): number =>
+	b.createdAt - a.createdAt || b.id.localeCompare(a.id);
+
+/** Richest first, then most XP, then handle — see the interface note on `listTopBalances`. */
+const byBalanceDesc = (a: TopBalanceRow, b: TopBalanceRow): number =>
+	b.balance - a.balance || b.xp - a.xp || a.handle.localeCompare(b.handle);
+
+/** Longest streak first, then most XP, then handle. */
+const byStreakDesc = (a: TopStreakRow, b: TopStreakRow): number =>
+	b.streakDays - a.streakDays || b.xp - a.xp || a.handle.localeCompare(b.handle);
+
+/**
+ * Biggest payout first, then handle, then bet id — the documented tie-break order
+ * of {@link BetRepo.listTopWinsForDate}. The bet id only breaks ties here (the
+ * Postgres driver orders on the column directly); it never leaves the driver, so
+ * the row the caller sees carries no ids.
+ */
+const byPayoutDesc = (a: [TopWinRow, string], b: [TopWinRow, string]): number =>
+	b[0].payout - a[0].payout || a[0].handle.localeCompare(b[0].handle) || a[1].localeCompare(b[1]);
 
 export type MemoryStoreOptions = {
 	/** Injectable clock — tests pin it so `createdAt`/`updatedAt` are deterministic. */
@@ -236,7 +266,37 @@ export class MemoryStore implements GameStore {
 			profile.streakDays = next.streakDays;
 			profile.lastBetDate = next.lastBetDate;
 			return profile;
-		}
+		},
+		// 🏆 Top balances (T14). The wallet is a precomputed column, so this is a
+		// sort over `profiles` plus a Map lookup per row — the memory twin of the
+		// `left join user_stats`, right down to keeping a player whose stats row
+		// does not exist yet (their counters read 0).
+		listTopBalances: async (limit) => {
+			const rows: TopBalanceRow[] = [];
+			for (const profile of this.profilesById.values()) {
+				const stats = this.statsByUser.get(profile.userId);
+				rows.push({
+					handle: profile.handle,
+					balance: profile.balance,
+					xp: profile.xp,
+					streakDays: profile.streakDays,
+					betsPlaced: stats?.betsPlaced ?? 0,
+					betsWon: stats?.betsWon ?? 0
+				});
+			}
+			return rows.sort(byBalanceDesc).slice(0, leaderboardLimit(limit));
+		},
+		// 🔥 Longest streaks (T14): a zero streak is "no streak", not a rank.
+		listTopStreaks: async (limit) =>
+			[...this.profilesById.values()]
+				.filter((profile) => profile.streakDays > 0)
+				.sort(byStreakDesc)
+				.slice(0, leaderboardLimit(limit))
+				.map((profile) => ({
+					handle: profile.handle,
+					streakDays: profile.streakDays,
+					xp: profile.xp
+				}))
 	};
 
 	// -- bets -----------------------------------------------------------------
@@ -254,6 +314,55 @@ export class MemoryStore implements GameStore {
 				.filter((b) => b.userId === userId && b.settledAt !== null)
 				.sort(bySettledDesc)
 				.slice(0, Math.max(0, limit)),
+		// ⚡ Today's biggest calls (T14). The trade date lives on the session, not
+		// on the bet, so the filter goes through `sessionsByDate` — the same join
+		// the Postgres driver writes in SQL. A bet with no profile row is dropped,
+		// exactly as the `join profiles` drops it there.
+		listTopWinsForDate: async (tradeDate, limit) => {
+			const sessionIds = new Set<number>();
+			for (const session of this.sessionsByDate.values()) {
+				if (session.tradeDate === tradeDate) sessionIds.add(session.id);
+			}
+			const ranked: [TopWinRow, string][] = [];
+			for (const bet of this.betsById.values()) {
+				if (!sessionIds.has(bet.sessionId) || bet.settledAt === null) continue;
+				const profile = this.profilesById.get(bet.userId);
+				if (!profile) continue;
+				ranked.push([
+					{
+						handle: profile.handle,
+						underlying: bet.underlying,
+						targetKind: bet.targetKind,
+						deltaPoints: bet.deltaPoints,
+						stake: bet.stake,
+						payout: bet.payout ?? 0,
+						odds: bet.odds,
+						// Unreachable as null: only settled bets survive the filter above.
+						settlementTier: bet.settlementTier ?? 'miss'
+					},
+					bet.id
+				]);
+			}
+			return ranked
+				.sort(byPayoutDesc)
+				.slice(0, leaderboardLimit(limit))
+				.map(([row]) => row);
+		},
+		// The /history page (T14): every status, newest first, keyset-paginated. The
+		// `beforeId` half of the cursor is what keeps two same-millisecond bets from
+		// straddling a page boundary and losing one on the next page.
+		listBetsForUserPage: async (userId, options: BetPageOptions) =>
+			[...this.betsById.values()]
+				.filter((b) => {
+					if (b.userId !== userId) return false;
+					if (options.beforeCreatedAt === undefined) return true;
+					if (b.createdAt !== options.beforeCreatedAt) {
+						return b.createdAt < options.beforeCreatedAt;
+					}
+					return options.beforeId !== undefined && b.id < options.beforeId;
+				})
+				.sort(byCreatedDesc)
+				.slice(0, Math.max(0, Math.trunc(options.limit))),
 		listBetsForSession: async (sessionId) =>
 			[...this.betsById.values()].filter((b) => b.sessionId === sessionId).sort(byCreatedThenId),
 		upsertBet: async (input) => {

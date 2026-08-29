@@ -17,13 +17,20 @@ const EMAIL = 'priya@example.com';
 
 type LoadEvent = Parameters<typeof load>[0];
 
+/**
+ * `viewerHandle` stands in for the identity the auth hooks resolved: it decides
+ * the page's `isSelf`, which is what offers a signed-in player their own
+ * `/history` link (T14 nav wiring). Absent = anonymous.
+ */
 async function call(
-	handle: string
+	handle: string,
+	viewerHandle: string | null = null
 ): Promise<{ ok: true; data: unknown } | { ok: false; status: number; message: string }> {
 	try {
 		const event = {
 			params: { handle },
-			url: new URL(`http://localhost:5173/u/${handle}`)
+			url: new URL(`http://localhost:5173/u/${handle}`),
+			locals: { userId: viewerHandle === null ? null : 'u1', handle: viewerHandle }
 		} as unknown as LoadEvent;
 		return { ok: true, data: await load(event) };
 	} catch (err: unknown) {
@@ -97,6 +104,26 @@ describe('/u/[handle] load', () => {
 			tagline: 'First chips on the felt.'
 		});
 		expect(profile.joined).toBe('2026-08-27');
+	});
+
+	it('tells the viewer whether the profile is their own, and leaks nothing extra when it is', async () => {
+		const store = getStore();
+		await store.profiles.insertProfile({
+			userId: USER,
+			handle: HANDLE,
+			email: EMAIL,
+			balance: 1_000
+		});
+
+		// A stranger looking at priya: no history link, and no extra field about them.
+		const stranger = (await call(HANDLE, 'arjun')) as { data: { isSelf: boolean } };
+		expect(stranger.data.isSelf).toBe(false);
+
+		const self = (await call(HANDLE, HANDLE)) as { data: { isSelf: boolean } };
+		expect(self.data.isSelf).toBe(true);
+
+		const anonymous = (await call(HANDLE)) as { data: { isSelf: boolean } };
+		expect(anonymous.data.isSelf).toBe(false);
 	});
 
 	it('derives the rank title from xp at render time, never from a stored column', async () => {

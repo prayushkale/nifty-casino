@@ -36,6 +36,8 @@ import {
 	DuplicatePayoutError,
 	InsufficientFundsError,
 	NotFoundError,
+	leaderboardLimit,
+	type BetPageOptions,
 	type BetRepo,
 	type CloseRepo,
 	type GameStore,
@@ -45,6 +47,9 @@ import {
 	type SessionRepo,
 	type StatsRepo,
 	type TickRepo,
+	type TopBalanceRow,
+	type TopStreakRow,
+	type TopWinRow,
 	type TxStore
 } from './interface';
 import {
@@ -497,6 +502,53 @@ function createRepos(sql: SqlClient): TxStore {
 				returning *`;
 			if (rows.length === 0) throw new NotFoundError(`profile ${userId}`);
 			return mapProfile(rows[0]);
+		},
+		// 🏆 Top balances (T14). The counters come from `user_stats` — the row that
+		// bet placement and settlement already maintain — so there is no aggregate
+		// anywhere in this query (PLAN §3). `left join`, not `join`: a funded player
+		// who has never settled a bet belongs on the board with zeroed counters, and
+		// `coalesce` spells that out. Ordering ends on `handle` so every node renders
+		// the same board from the same rows.
+		//
+		// No index on `balance` yet: migrations are frozen and 100 rows cached for
+		// 30s is a negligible read. If profiles ever reach lakhs, the Tier-2 move is
+		// `create index profiles_balance_idx on profiles (balance desc)` — an index,
+		// not an aggregate, so the doctrine holds.
+		listTopBalances: async (limit) => {
+			const rows = await sql`
+				select p.handle, p.balance, p.xp, p.streak_days,
+				       coalesce(s.bets_placed, 0) as bets_placed,
+				       coalesce(s.bets_won, 0) as bets_won
+				from profiles p
+				left join user_stats s on s.user_id = p.user_id
+				order by p.balance desc, p.xp desc, p.handle asc
+				limit ${leaderboardLimit(limit)}`;
+			return rows.map(
+				(row): TopBalanceRow => ({
+					handle: String(row.handle),
+					balance: toNum(row.balance),
+					xp: toNum(row.xp),
+					streakDays: toNum(row.streak_days),
+					betsPlaced: toNum(row.bets_placed),
+					betsWon: toNum(row.bets_won)
+				})
+			);
+		},
+		// 🔥 Longest streaks (T14) — one indexed-in-spirit column, already written by
+		// the settlement engine's gamification step.
+		listTopStreaks: async (limit) => {
+			const rows = await sql`
+				select handle, streak_days, xp from profiles
+				where streak_days > 0
+				order by streak_days desc, xp desc, handle asc
+				limit ${leaderboardLimit(limit)}`;
+			return rows.map(
+				(row): TopStreakRow => ({
+					handle: String(row.handle),
+					streakDays: toNum(row.streak_days),
+					xp: toNum(row.xp)
+				})
+			);
 		}
 	};
 
@@ -521,6 +573,56 @@ function createRepos(sql: SqlClient): TxStore {
 				where user_id = ${userId} and settled_at is not null
 				order by settled_at desc, created_at desc, id desc
 				limit ${Math.max(0, limit)}`;
+			return rows.map(mapBet);
+		},
+		// ⚡ Today's biggest calls (T14). The trade date is reached through
+		// `daily_sessions` (the bet's own row has no date column), `join profiles`
+		// names the player, and `settled_at is not null` keeps open bets off a public
+		// board. Ordering ends on `p.handle, b.id` so equal payouts always rank the
+		// same way — see the interface note for why that is load-bearing.
+		listTopWinsForDate: async (tradeDate, limit) => {
+			const rows = await sql`
+				select p.handle, b.underlying, b.target_kind, b.delta_points,
+				       b.stake, b.payout, b.odds, b.settlement_tier
+				from bets b
+				join daily_sessions s on s.id = b.session_id
+				join profiles p on p.user_id = b.user_id
+				where s.trade_date = ${tradeDate} and b.settled_at is not null
+				order by b.payout desc, p.handle asc, b.id asc
+				limit ${leaderboardLimit(limit)}`;
+			return rows.map(
+				(row): TopWinRow => ({
+					handle: String(row.handle),
+					underlying: String(row.underlying) as TopWinRow['underlying'],
+					targetKind: String(row.target_kind) as TopWinRow['targetKind'],
+					deltaPoints: toNum(row.delta_points),
+					stake: toNum(row.stake),
+					payout: toNum(row.payout),
+					odds: toNum(row.odds),
+					// Unreachable as null: the `settled_at is not null` filter guarantees a tier.
+					settlementTier: (row.settlement_tier as TopWinRow['settlementTier'] | null) ?? 'miss'
+				})
+			);
+		},
+		// The /history page (T14) — a keyset walk over `bets_user_created
+		// (user_id, created_at desc)`. `beforeCreatedAt` alone is a plain `<` cursor;
+		// with `beforeId` it becomes `created_at < c OR (created_at = c AND id < i)`,
+		// which is what makes rows sharing the cursor instant lossless rather than
+		// skipped. The id never crosses back out of this driver.
+		listBetsForUserPage: async (userId, options: BetPageOptions) => {
+			const cursor =
+				options.beforeCreatedAt === undefined
+					? (sql`` as postgres.Fragment)
+					: options.beforeId === undefined
+						? (sql` and created_at < ${new Date(options.beforeCreatedAt)}` as postgres.Fragment)
+						: (sql` and (created_at < ${new Date(options.beforeCreatedAt)}
+						          or (created_at = ${new Date(options.beforeCreatedAt)}
+						              and id < ${options.beforeId}))` as postgres.Fragment);
+			const rows = await sql`
+				select * from bets
+				where user_id = ${userId}${cursor}
+				order by created_at desc, id desc
+				limit ${Math.max(0, Math.trunc(options.limit))}`;
 			return rows.map(mapBet);
 		},
 		listBetsForSession: async (sessionId) => {

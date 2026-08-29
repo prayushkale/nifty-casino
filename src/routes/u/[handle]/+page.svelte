@@ -89,6 +89,18 @@
 			</span>
 		</header>
 
+		<!-- ── nav (T14): the board for everyone, the log only for its owner ──────── -->
+		<nav class="flex flex-wrap gap-2" aria-label="Profile navigation">
+			<a href="/leaderboard" class="nc-btn-ghost text-xs">
+				<span aria-hidden="true">🏆</span> Leaderboard
+			</a>
+			{#if data.isSelf}
+				<a href="/history" class="nc-btn-ghost text-xs">
+					<span aria-hidden="true">🧾</span> Your history
+				</a>
+			{/if}
+		</nav>
+
 		<!-- ── the four numbers a rival checks first ────────────────────────────────── -->
 		<section
 			class="grid grid-cols-2 gap-3 sm:grid-cols-4"

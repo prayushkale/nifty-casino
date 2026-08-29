@@ -92,6 +92,37 @@ export const COSMETIC_INTERPOLATION = false as const;
 export const MIN_STAKE = 10;
 export const MAX_STAKE = 100_000;
 
+/**
+ * The hard cap on every leaderboard read (PLAN §5 T14: "cap 100").
+ *
+ * This is the DOCUMENTED PRODUCT CAP, not a hidden safety net: a caller may ask
+ * for fewer rows (`/leaderboard` shows 25, `/history` pages 50) but never for
+ * more, and both drivers clamp to it identically so no code path can silently
+ * widen the read. It exists because a public, cacheable, unauthenticated
+ * endpoint must have a bound that is written down rather than discovered under
+ * load — an unbounded `order by balance desc` is one crawler away from a table
+ * scan per request.
+ *
+ * Deliberately in shared config (not a server-only module): the page that renders
+ * a list and the driver that reads it should be able to name the same number.
+ */
+export const MAX_LEADERBOARD_ROWS = 100;
+
+/** Row count the /history page and `GET /api/history` serve per page. */
+export const HISTORY_PAGE_SIZE = 50;
+
+/**
+ * How long the process-wide leaderboard payload lives (PLAN §5 T14: "cache 30s").
+ *
+ * The board is identical for every visitor, so caching it per process costs
+ * nothing in correctness and turns three ordered reads per page view into three
+ * per 30s. 30s is the sweet spot the plan names: a freshly settled day reaches
+ * the board within half a minute, and a hot page never re-sorts `profiles` twice
+ * in the same tick. Tier 2 keeps this number and moves the backing store to
+ * Redis (see `$lib/server/cache`).
+ */
+export const LEADERBOARD_CACHE_TTL_MS = 30_000;
+
 // ---------------------------------------------------------------------------
 // Settlement (PLAN §5 T9) — capture, chunking and the gamification accrual
 // ---------------------------------------------------------------------------
