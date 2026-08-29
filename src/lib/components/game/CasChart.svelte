@@ -29,6 +29,7 @@
 		type CasPoint
 	} from '$lib/game/chart';
 	import { formatNC, projectedPayout, type CasLiveValue, type GamePhase } from '$lib/stores/game';
+	import Skeleton from './Skeleton.svelte';
 
 	/**
 	 * One auction chart (PLAN §4 "auction mode", §5 T12): the day's CAS line, the
@@ -398,8 +399,13 @@
 	<div class="relative mt-2" style={`height:${HEIGHT}px`} bind:this={container}>
 		{#if !ready}
 			<div
-				class="absolute inset-0 flex flex-col items-center justify-center rounded-lg border border-dashed border-felt-700 bg-felt-900 px-3 text-center"
+				class="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed border-felt-700 bg-felt-900 px-3 text-center"
 			>
+				{#if ticks.length === 0 && !frozen}
+					<!-- No snapshot yet (a slow read, or a client-side navigation into an
+					     empty day): shimmer first, then hand the surface to the chart. -->
+					<Skeleton variant="block" height={64} label="Loading the {label} chart" />
+				{/if}
 				<p class="text-[11px] leading-relaxed text-zinc-600">
 					{#if ticks.length === 0}
 						{frozen

@@ -16,8 +16,10 @@ import {
 	bettingPhase,
 	countdownToCutoff,
 	formatCountdown,
+	formatDurationShort,
 	formatNC,
 	isLivePhase,
+	nextWindowOpen,
 	projectedPayout,
 	stakeValidationError,
 	type GamePhase
@@ -398,5 +400,100 @@ describe('isLivePhase', () => {
 		['closed-weekend', false]
 	] as const)('%s → %s', (phase, expected) => {
 		expect(isLivePhase(phase)).toBe(expected);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// the countdown to the NEXT session (T13)
+// ---------------------------------------------------------------------------
+
+describe('nextWindowOpen — the next 15:00:00 IST opening', () => {
+	// 2026-08-26 is the Wednesday the tables above use; guard the rest of the week.
+	const THURSDAY = '2026-08-27';
+	const FRIDAY = '2026-08-28';
+	const MONDAY = '2026-08-31';
+	expect(isWeekend(THURSDAY)).toBe(false);
+	expect(isWeekend(FRIDAY)).toBe(false);
+	expect(isWeekend(MONDAY)).toBe(false);
+	expect(isWeekend('2026-08-30')).toBe(true);
+
+	it('opens later on a trading day → today', () => {
+		expect(nextWindowOpen(at(THURSDAY, 9, 0, 0))).toEqual({
+			ms: at(THURSDAY, 15, 0, 0) - at(THURSDAY, 9, 0, 0),
+			label: 'today'
+		});
+	});
+
+	it('one second before the open → 1,000 ms, still today', () => {
+		expect(nextWindowOpen(at(FRIDAY, 14, 59, 59))).toEqual({
+			ms: 1_000,
+			label: 'today'
+		});
+	});
+
+	it('at 15:00:00.000 exactly the window is open, so the next one is tomorrow', () => {
+		expect(nextWindowOpen(at(THURSDAY, 15, 0, 0)).label).toBe('tomorrow');
+		expect(nextWindowOpen(at(THURSDAY, 15, 0, 0)).ms).toBe(86_400_000);
+	});
+
+	it('after the session on a weekday → the next day at 15:00', () => {
+		expect(nextWindowOpen(at(THURSDAY, 16, 0, 0))).toEqual({
+			ms: at(FRIDAY, 15, 0, 0) - at(THURSDAY, 16, 0, 0),
+			label: 'tomorrow'
+		});
+		expect(nextWindowOpen(at(THURSDAY, 23, 59, 59)).label).toBe('tomorrow');
+	});
+
+	it('Friday evening → Monday, skipping the weekend', () => {
+		expect(nextWindowOpen(at(FRIDAY, 16, 0, 0))).toEqual({
+			ms: at(MONDAY, 15, 0, 0) - at(FRIDAY, 16, 0, 0),
+			label: 'Monday'
+		});
+	});
+
+	it('any instant of the weekend → Monday 15:00 IST', () => {
+		for (const instant of [
+			at(SATURDAY, 0, 0, 0),
+			at(SATURDAY, 15, 0, 0),
+			at(SATURDAY, 23, 59, 59)
+		]) {
+			const next = nextWindowOpen(instant);
+			expect(next.label).toBe('Monday');
+			expect(next.ms).toBe(at(MONDAY, 15, 0, 0) - instant);
+		}
+	});
+
+	it('Sunday reads "tomorrow" — Monday really is the next day', () => {
+		const sunday = at('2026-08-30', 12, 0, 0);
+		expect(nextWindowOpen(sunday)).toEqual({
+			ms: at(MONDAY, 15, 0, 0) - sunday,
+			label: 'tomorrow'
+		});
+	});
+
+	it('never returns a zero or negative gap', () => {
+		for (let ms = 0; ms < 86_400_000; ms += 971_000) {
+			expect(nextWindowOpen(at(MONDAY, 0, 0, 0) + ms).ms).toBeGreaterThan(0);
+		}
+	});
+});
+
+describe('formatDurationShort — a countdown read at a glance', () => {
+	it.each([
+		[0, '0s'],
+		[-5, '0s'],
+		[Number.NaN, '0s'],
+		[999, '0s'],
+		[1_000, '1s'],
+		[59_000, '59s'],
+		[60_000, '1m 00s'],
+		[61_000, '1m 01s'],
+		[3_599_000, '59m 59s'],
+		[3_600_000, '1h 00m'],
+		[8_040_000, '2h 14m'],
+		[86_400_000, '1d 00h'],
+		[3 * 86_400_000 + 2 * 3_600_000, '3d 02h']
+	] as const)('%p ms → %s', (ms, expected) => {
+		expect(formatDurationShort(ms)).toBe(expected);
 	});
 });

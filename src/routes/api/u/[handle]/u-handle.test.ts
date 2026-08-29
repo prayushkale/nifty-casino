@@ -157,7 +157,8 @@ describe('GET /api/u/[handle]', () => {
 				}
 			],
 			joined: '2026-08-27',
-			rank: null
+			// Derived from `xp` (0 → Rookie) at render time; never a stored column.
+			rank: { level: 1, title: 'Rookie', tagline: 'First chips on the felt.' }
 		});
 
 		// Whole-body search: the profile is public, so it must survive a stranger

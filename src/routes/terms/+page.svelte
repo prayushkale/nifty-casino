@@ -26,6 +26,29 @@
 			body: 'The service is provided as is. To the extent permitted by law we are not liable for any loss arising from its use, including any decision you make about real securities after playing here.'
 		}
 	];
+
+	/**
+	 * The payout rule behind the modal's "how it pays" link (T13). The numbers are
+	 * the ladder's odds; this is the RULE, so it only changes when the settlement
+	 * contract does.
+	 */
+	const payouts: { outcome: string; condition: string; result: string }[] = [
+		{
+			outcome: '🎯 Hit',
+			condition: 'Right direction, and the close lands inside the target band.',
+			result: 'Your stake × the odds on the rung you picked (up to 6×).'
+		},
+		{
+			outcome: '➖ Flat',
+			condition: 'The index barely moves — inside the dead zone around the previous close.',
+			result: 'Your stake back in full. No win, no loss.'
+		},
+		{
+			outcome: '💀 Miss',
+			condition: 'Everything else — wrong direction, or right direction but outside the band.',
+			result: 'The stake is lost in full. There is no consolation tier.'
+		}
+	];
 </script>
 
 <svelte:head>
@@ -40,10 +63,36 @@
 		</p>
 	</header>
 
+	<!-- The payout table sits FIRST, because the confirm modal links straight here. -->
+	<section
+		id="payouts"
+		class="scroll-mt-24 rounded-xl border border-felt-700 bg-felt-900/80 p-5 shadow-card"
+	>
+		<h2 class="text-base font-semibold text-gold">How a bet pays</h2>
+		<p class="mt-1.5 text-zinc-400">
+			Every call is measured against the index's previous close, using the exchange's published
+			closing auction value. Three things can happen:
+		</p>
+		<ul class="mt-4 flex flex-col gap-3">
+			{#each payouts as row}
+				<li class="rounded-lg border border-felt-800 bg-felt-900/60 p-3">
+					<p class="font-semibold text-zinc-100">{row.outcome}</p>
+					<p class="mt-1 text-zinc-400">{row.condition}</p>
+					<p class="mt-1 text-zinc-300">{row.result}</p>
+				</li>
+			{/each}
+		</ul>
+		<p class="mt-4 text-xs text-zinc-500">
+			The odds for a given target (3.2× to 6×) are shown on the ladder chip and repeated on the
+			confirm screen before any stake is taken. One bet per index per day; bets can be edited or
+			cancelled until the 15:20 IST cutoff.
+		</p>
+	</section>
+
 	{#each terms as section}
-		<section class="space-y-1.5">
+		<section class="rounded-xl border border-felt-800 bg-felt-900/40 p-5">
 			<h2 class="text-base font-semibold text-gold">{section.heading}</h2>
-			<p class="leading-relaxed text-zinc-400">{section.body}</p>
+			<p class="mt-1.5 leading-relaxed text-zinc-400">{section.body}</p>
 		</section>
 	{/each}
 

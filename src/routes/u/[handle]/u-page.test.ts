@@ -91,7 +91,37 @@ describe('/u/[handle] load', () => {
 			'winRate',
 			'xp'
 		]);
-		expect(profile.rank).toBeNull(); // T13 fills the title in, key stays put
+		expect(profile.rank).toEqual({
+			level: 1,
+			title: 'Rookie',
+			tagline: 'First chips on the felt.'
+		});
 		expect(profile.joined).toBe('2026-08-27');
+	});
+
+	it('derives the rank title from xp at render time, never from a stored column', async () => {
+		const store = getStore();
+		await store.profiles.insertProfile({
+			userId: USER,
+			handle: HANDLE,
+			email: EMAIL,
+			balance: 1_000
+		});
+		// The same write the settlement engine makes — 4,000 XP lands exactly on the
+		// Pit Boss threshold, which is where the ladder table pins that rung.
+		await store.profiles.applyProfileProgress(USER, {
+			xpDelta: 4_000,
+			streakDays: 3,
+			lastBetDate: '2026-08-27'
+		});
+
+		const result = await call(HANDLE);
+		expect(result.ok).toBe(true);
+		const { profile } = (result as { data: { profile: { rank: unknown } } }).data;
+		expect(profile.rank).toEqual({
+			level: 6,
+			title: 'Pit Boss',
+			tagline: 'The floor keeps an eye on them, not the other way round.'
+		});
 	});
 });

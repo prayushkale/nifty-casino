@@ -14,6 +14,7 @@
 		type GamePhase
 	} from '$lib/stores/game';
 	import ConfirmModal from './ConfirmModal.svelte';
+	import Skeleton from './Skeleton.svelte';
 
 	/**
 	 * One index, the whole bet flow for it (PLAN §4 index card):
@@ -43,6 +44,12 @@
 	export let myBet: StateBet | null = null;
 	/** Mobile accordion: the card the player is working on is expanded. */
 	export let expanded = true;
+	/**
+	 * True while a `/api/state` read is in flight (T13). An empty ladder is either
+	 * "no ladder today" or "not landed yet", and those need different answers: the
+	 * first is information, the second is a shimmer.
+	 */
+	export let loading = false;
 
 	const dispatch = createEventDispatcher<{
 		toggle: void;
@@ -197,7 +204,7 @@
 	<header>
 		<button
 			type="button"
-			class="flex w-full items-center justify-between gap-3 text-left"
+			class="flex min-h-[44px] w-full items-center justify-between gap-3 text-left"
 			aria-expanded={expanded}
 			on:click={() => dispatch('toggle')}
 		>
@@ -226,7 +233,11 @@
 	</header>
 
 	{#if expanded}
-		{#if steps.length === 0}
+		{#if steps.length === 0 && loading && phase === 'pre'}
+			<!-- The ladder has not landed yet (an anonymous→authed swap, a slow read).
+			     Shimmer rather than declare the day ladder-less while the read runs. -->
+			<Skeleton lines={4} label="Loading the {label} ladder" />
+		{:else if steps.length === 0}
 			<p class="rounded-lg border border-felt-700 bg-felt-800/60 px-3 py-2 text-xs text-zinc-400">
 				No ladder for {label} today — the previous close has not landed yet.
 			</p>

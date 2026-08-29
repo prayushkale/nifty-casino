@@ -1,14 +1,17 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { formatNC } from '$lib/stores/game';
+	import RollValue from './RollValue.svelte';
 
 	/**
 	 * The wallet, always top-right (PLAN §4 "three fixed anchors").
 	 *
 	 * The number is the server's, never the client's arithmetic: the chip renders
-	 * whatever `/api/state` last said, and re-reads land here after every bet. A
-	 * swap in value flashes green or red once — feedback that the money moved,
-	 * without ever showing a number the server has not confirmed.
+	 * whatever `/api/state` last said, and re-reads land here after every bet. Two
+	 * pieces of feedback, neither of them optimistic — the number ROLLS to the
+	 * server's figure (T13), and the chip flashes green or red once, so a win and a
+	 * stake read differently at the edge of the eye. Nothing on screen is a number
+	 * the server has not confirmed.
 	 */
 	export let balance: number | null = null;
 	/** When set the chip links to the player's public profile. */
@@ -36,19 +39,18 @@
 		<span aria-hidden="true">🪙</span>
 		<span class="num">—</span>
 	</span>
+{:else if handle}
+	<a
+		href={`/u/${handle}`}
+		class="nc-chip {flash} transition-colors duration-500"
+		title="{formatNC(balance)} NC — view your profile"
+	>
+		<span aria-hidden="true">🪙</span>
+		<RollValue value={balance} suffix=" NC" />
+	</a>
 {:else}
-	{@const content = `🪙 ${formatNC(balance)} NC`}
-	{#if handle}
-		<a
-			href={`/u/${handle}`}
-			class="nc-chip {flash} transition-colors duration-500"
-			title="{formatNC(balance)} NC — view your profile"
-		>
-			{content}
-		</a>
-	{:else}
-		<span class="nc-chip {flash} transition-colors duration-500" title="Your chip stack">
-			{content}
-		</span>
-	{/if}
+	<span class="nc-chip {flash} transition-colors duration-500" title="Your chip stack">
+		<span aria-hidden="true">🪙</span>
+		<RollValue value={balance} suffix=" NC" />
+	</span>
 {/if}

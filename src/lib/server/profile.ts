@@ -17,6 +17,7 @@
  * is also the whole security boundary: nothing else in the chain filters.
  */
 import { istDateStr } from '$lib/time/ist';
+import { rankViewFor, type RankView } from '$lib/config/ranks';
 import { getStore, type GameStore } from '$lib/server/db';
 import type { Bet, Profile, SettlementTier, Underlying, UserStats } from '$lib/server/db/types';
 
@@ -54,11 +55,14 @@ export type PublicProfile = {
 	/** IST date the account was created ('YYYY-MM-DD'). */
 	joined: string;
 	/**
-	 * TODO(T13): the rank title, from the XP thresholds in config. The key is
-	 * present and `null` today so the page and the JSON shape are already what
-	 * T13 fills in — nothing downstream has to change when it lands.
+	 * The rank title, DERIVED from `xp` at render time — never stored, never a
+	 * column. A rank is a pure function of the XP the wallet already carries
+	 * (`$lib/config/ranks`), so re-tuning the ladder re-titles every player
+	 * retroactively with no migration, and there is no second number that can
+	 * drift away from `xp`. Carries only `{level, title, tagline}`: the
+	 * thresholds stay in config, where they are tuned and tested.
 	 */
-	rank: null;
+	rank: RankView;
 };
 
 /** Dependencies overridable per call — tests inject a store. */
@@ -126,6 +130,6 @@ export async function buildPublicProfile(
 		},
 		recentBets: bets.map(toPublicBet),
 		joined: istDateStr(new Date(profile.createdAt)),
-		rank: null
+		rank: rankViewFor(profile.xp)
 	};
 }

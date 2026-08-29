@@ -63,7 +63,7 @@
 				</div>
 				<button
 					type="button"
-					class="-mr-1 -mt-1 rounded-lg px-2 py-1 text-lg leading-none text-zinc-500 transition hover:text-zinc-200"
+					class="-mr-2 -mt-2 flex h-11 w-11 items-center justify-center rounded-lg text-lg leading-none text-zinc-500 transition hover:text-zinc-200"
 					aria-label="Close"
 					on:click={() => dispatch('cancel')}>✕</button
 				>
@@ -116,6 +116,20 @@
 					<span class="num text-zinc-300">{formatNC(balanceAfter)} NC</span>
 				</p>
 			{/if}
+
+			<!-- "How it pays" — the odds are quoted above, the rule behind them is one
+			     tap away, and the player never has to take the table's word for it. -->
+			<p class="mt-3 text-[11px] text-zinc-500">
+				Not sure how a call pays?
+				<a
+					href="/terms#payouts"
+					target="_blank"
+					rel="noopener noreferrer"
+					class="text-gold underline decoration-gold-dim hover:text-gold-glow"
+				>
+					Read the payout rules<span class="sr-only"> (opens in a new tab)</span> ↗
+				</a>
+			</p>
 
 			{#if error}
 				<p class="nc-alert mt-3" role="alert">{error}</p>

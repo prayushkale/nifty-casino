@@ -8,6 +8,7 @@
 	import CountdownPill from '$lib/components/game/CountdownPill.svelte';
 	import MobileBottomNav from '$lib/components/game/MobileBottomNav.svelte';
 	import PotTicker from '$lib/components/game/PotTicker.svelte';
+	import Toaster from '$lib/components/game/Toaster.svelte';
 	import type { StatePayload } from '$lib/server/state';
 	import {
 		bettingPhase,
@@ -157,9 +158,12 @@
 		<a href="/terms" class="underline decoration-zinc-700">Terms</a>
 		<span class="mx-1.5 text-felt-700" aria-hidden="true">·</span>
 		<a href="/leaderboard" class="underline decoration-zinc-700">Leaderboard</a>
+		<span class="mx-1.5 text-felt-700" aria-hidden="true">·</span>
+		<a href="/history" class="underline decoration-zinc-700">History</a>
 	</footer>
 	<!-- Room for the fixed mobile nav so it never covers the footer. -->
 	<div class="h-16 md:hidden" aria-hidden="true" />
 </div>
 
+<Toaster />
 <MobileBottomNav {handle} />

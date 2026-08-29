@@ -28,8 +28,17 @@ import { get, writable, type Readable, type Writable } from 'svelte/store';
 import { BETTING_START_HMS, CUTOFF_HMS, MAX_STAKE, MIN_STAKE } from '$lib/config/app';
 import { computeTier, payoutFor, type PayableTier } from '$lib/game/tier';
 import type { LadderOption, LadderUnderlying } from '$lib/config/ladder';
-import { hmsToSeconds, isWeekend, secOfDayIst, shiftIstDate } from '$lib/time/ist';
+import {
+	hmsToSeconds,
+	isWeekend,
+	istDateStrToMidnightUtcMs,
+	istHmsToUtcMs,
+	secOfDayIst,
+	shiftIstDate,
+	istDateStr
+} from '$lib/time/ist';
 import type { StatePayload } from '$lib/server/state';
+import { toast } from '$lib/stores/toast';
 
 // ---------------------------------------------------------------------------
 // display vocabulary
@@ -147,6 +156,69 @@ export function nextTradingDayName(dateStr: string): string {
 		return DAY_NAMES[weekday] ?? 'the next trading day';
 	}
 	return 'the next trading day';
+}
+
+/**
+ * The next 15:00:00 IST opening, however far away it is.
+ *
+ * T13's countdown-to-next-session: the PhaseBanner's `pre` and `closed-weekend`
+ * states need a live "opens in 4h 12m", and a live countdown needs a pure source
+ * of truth that agrees with the phase machine above. It does — the same
+ * `BETTING_START_HMS`, the same weekend rule, and the same strictness (`sec <
+ * startSec` means 15:00:00.000 exactly is already OPEN, so it is never
+ * "upcoming").
+ *
+ * Skips weekends only, exactly like `nextTradingDayName`: a mid-week market
+ * holiday is the data layer's business and no calendar walk can see it.
+ */
+export type NextWindowOpen = {
+	/** Milliseconds until the opening instant — always positive when returned. */
+	ms: number;
+	/** The day phrase to render before "at 15:00 IST": 'today' | 'tomorrow' | weekday. */
+	label: string;
+};
+
+export function nextWindowOpen(now: number | Date): NextWindowOpen {
+	const at = toMs(now);
+	const today = istDateStr(new Date(at));
+	const openAtMs = (dateStr: string): number =>
+		istHmsToUtcMs(istDateStrToMidnightUtcMs(dateStr), BETTING_START_HMS);
+
+	// Later today, and today is a trading day: the window has not opened yet.
+	if (!isWeekend(today) && secOfDayIst(new Date(at)) < hmsToSeconds(BETTING_START_HMS)) {
+		return { ms: Math.max(1, openAtMs(today) - at), label: 'today' };
+	}
+
+	for (let ahead = 1; ahead <= 7; ahead += 1) {
+		const candidate = shiftIstDate(today, ahead);
+		if (isWeekend(candidate)) continue;
+		return {
+			ms: Math.max(1, openAtMs(candidate) - at),
+			label: ahead === 1 ? 'tomorrow' : nextTradingDayName(today)
+		};
+	}
+	// Unreachable: seven days always contain a weekday.
+	return { ms: 0, label: 'the next trading day' };
+}
+
+/**
+ * A countdown a player reads at a glance: `42s` · `4m 05s` · `2h 14m` · `3d 02h`.
+ *
+ * The trailing unit is zero-padded once there is a bigger unit in front, so a
+ * ticking value never changes width (`4m 05s` → `4m 04s`, not `4m 5s`).
+ */
+export function formatDurationShort(ms: number): string {
+	if (!Number.isFinite(ms) || ms <= 0) return '0s';
+	const totalSec = Math.floor(ms / 1000);
+	const days = Math.floor(totalSec / 86_400);
+	const hours = Math.floor((totalSec % 86_400) / 3600);
+	const mins = Math.floor((totalSec % 3600) / 60);
+	const secs = totalSec % 60;
+	const pad = (n: number): string => String(n).padStart(2, '0');
+	if (days > 0) return `${days}d ${pad(hours)}h`;
+	if (hours > 0) return `${hours}h ${pad(mins)}m`;
+	if (mins > 0) return `${mins}m ${pad(secs)}s`;
+	return `${secs}s`;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +420,12 @@ export function syncServerClock(serverNowMs: number): void {
 /**
  * `GET /api/state` — the one-request screen rebuild. Every mutation ends with
  * this, and so does a cold page that was not seeded from `load`.
+ *
+ * A failure also toasts. The page renders its own inline alert with a retry link,
+ * but the failure usually happens while the player is looking at something else
+ * (a 30s settle poll against a dropped connection, a tab waking up), so it is
+ * announced where they will see it. The toast store dedupes identical messages,
+ * which is what makes toasting every failure safe rather than noisy.
  */
 export async function loadState(): Promise<StatePayload | null> {
 	stateLoading.set(true);
@@ -358,7 +436,9 @@ export async function loadState(): Promise<StatePayload | null> {
 		applyState(payload);
 		return payload;
 	} catch (err: unknown) {
-		stateError.set(err instanceof Error ? err.message : 'Could not load the table.');
+		const message = err instanceof Error ? err.message : 'Could not load the table.';
+		stateError.set(message);
+		toast('Could not reach the casino — check your connection.', { kind: 'err' });
 		return null;
 	} finally {
 		stateLoading.set(false);
@@ -489,8 +569,21 @@ export function betErrorMessage(code: string | undefined | null): string {
 	return BET_ERROR_COPY[code] ?? 'The table refused that — try again.';
 }
 
-/** POST/PATCH/DELETE a bet, then re-read the state the server now holds. */
-async function betRequest(url: string, init: RequestInit): Promise<ActionResult> {
+/**
+ * POST/PATCH/DELETE a bet, then re-read the state the server now holds.
+ *
+ * Both halves of the outcome are announced here, once, so every caller (the index
+ * card's confirm modal, the bets strip' cancel) gets the same feedback without
+ * each one owning a toast: success takes {@link successMessage}, failure reuses
+ * {@link betErrorMessage} — the T11 copy table, not a fork of it. The card keeps
+ * its inline error as well, because the modal must stay open with the reason in
+ * place; the toast is for the case where the player's eyes are elsewhere.
+ */
+async function betRequest(
+	url: string,
+	init: RequestInit,
+	successMessage: string
+): Promise<ActionResult> {
 	try {
 		const res = await fetch(url, {
 			...init,
@@ -499,18 +592,25 @@ async function betRequest(url: string, init: RequestInit): Promise<ActionResult>
 		const body = (await res.json().catch(() => ({}))) as { error?: string };
 		if (!res.ok) {
 			const code = body.error ?? 'BET_FAILED';
+			toast(betErrorMessage(code), { kind: 'err' });
 			return { ok: false, code, message: betErrorMessage(code) };
 		}
+		toast(successMessage, { kind: 'ok' });
 		await loadState();
 		return { ok: true };
 	} catch {
+		toast(betErrorMessage('NETWORK'), { kind: 'err' });
 		return { ok: false, code: 'NETWORK', message: betErrorMessage('NETWORK') };
 	}
 }
 
 /** POST /api/bets — place one leg. */
 export function placeBet(input: BetInput): Promise<ActionResult> {
-	return betRequest('/api/bets', { method: 'POST', body: JSON.stringify(input) });
+	return betRequest(
+		'/api/bets',
+		{ method: 'POST', body: JSON.stringify(input) },
+		'Bet placed — good luck.'
+	);
 }
 
 /** PATCH /api/bets/[id] — move target and/or stake; an omitted field is unchanged. */
@@ -518,10 +618,14 @@ export function editBet(
 	betId: string,
 	patch: Partial<Pick<BetInput, 'targetKind' | 'deltaPoints' | 'stake'>>
 ): Promise<ActionResult> {
-	return betRequest(`/api/bets/${betId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+	return betRequest(
+		`/api/bets/${betId}`,
+		{ method: 'PATCH', body: JSON.stringify(patch) },
+		'Bet updated.'
+	);
 }
 
 /** DELETE /api/bets/[id] — cancel before the cutoff and get the stake back. */
 export function cancelBet(betId: string): Promise<ActionResult> {
-	return betRequest(`/api/bets/${betId}`, { method: 'DELETE' });
+	return betRequest(`/api/bets/${betId}`, { method: 'DELETE' }, 'Bet cancelled — stake refunded.');
 }

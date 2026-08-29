@@ -8,6 +8,7 @@
 		SIGNUP_BONUS
 	} from '$lib/config/app';
 	import { LADDER_UNDERLYINGS, type LadderUnderlying } from '$lib/config/ladder';
+	import { nextRank, progressToNext, rankFor, xpToNext } from '$lib/config/ranks';
 	import type { StatePayload } from '$lib/server/state';
 	import CasChart from '$lib/components/game/CasChart.svelte';
 	import FeedStatusBanner from '$lib/components/game/FeedStatusBanner.svelte';
@@ -24,10 +25,12 @@
 		seedState,
 		startClock,
 		stateError,
+		stateLoading,
 		nowIst
 	} from '$lib/stores/game';
 	import type { GamePhase } from '$lib/stores/game';
 	import { casStream, startCasStream, resyncCasStream } from '$lib/stores/casStream';
+	import { startRevealWatcher } from '$lib/stores/reveal';
 
 	/**
 	 * The floor (PLAN §4). Desktop: three index cards and the bets strip, then the
@@ -61,6 +64,18 @@
 	$: anchors = state.ladder.anchors;
 	$: latest = $casLatest;
 	$: stream = $casStream;
+	// The rank is derived from the XP the payload already carries — never stored,
+	// so a re-tune of the ladder re-titles everyone with no migration.
+	$: xp = state.user?.xp ?? 0;
+	$: rank = rankFor(xp);
+	$: next = nextRank(xp);
+	$: rankProgress = progressToNext(xp);
+	$: rankGap = xpToNext(xp);
+	$: rankTitle = `${rank.tagline} — ${
+		next === null || rankGap === null
+			? `top of the ladder at ${formatNC(rank.minXp)} XP.`
+			: `${formatNC(rankGap)} XP to ${next.title}.`
+	}`;
 	$: cutoffLabel = `${CUTOFF_HMS.h}:${String(CUTOFF_HMS.m).padStart(2, '0')} IST`;
 	$: auctionLabel = `${AUCTION_START_HMS.h}:${String(AUCTION_START_HMS.m).padStart(2, '0')}:${String(
 		AUCTION_START_HMS.s
@@ -106,6 +121,12 @@
 		seedState(data.state);
 		const stopClock = startClock();
 
+		// The settlement reveal (T13): confetti on a HIT, a toast on a flat or a
+		// miss, once per bet per browser. It watches the shared `/api/state` store,
+		// so it fires whichever path the verdict arrived by — the 30s settle poll, a
+		// post-bet refresh, or a tab waking up.
+		const stopReveals = startRevealWatcher();
+
 		// The live feed. SSE with a REST snapshot for hydration, gap-fill and
 		// fallback — the page never polls directly.
 		const stopStream = startCasStream();
@@ -131,6 +152,7 @@
 
 		return () => {
 			stopClock();
+			stopReveals();
 			stopStream();
 			if (settleTimer !== null) clearInterval(settleTimer);
 			settleTimer = null;
@@ -152,33 +174,60 @@
 	<!-- ── the day, and what the room has staked ───────────────────────────────── -->
 	{#if !state.session.settled && state.user}
 		<section
-			class="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-felt-800 bg-felt-900/60 px-4 py-2.5 text-xs text-zinc-400"
-			aria-label="Your streak and experience"
+			class="flex flex-col gap-2 rounded-xl border border-felt-800 bg-felt-900/60 px-4 py-2.5 text-xs text-zinc-400 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-4 sm:gap-y-1"
+			aria-label="Your streak, rank and experience"
 		>
-			<span title="Consecutive betting days"
-				>🔥 <span class="num text-zinc-200">{state.user.streakDays}</span> day{state.user
-					.streakDays === 1
+			<div class="flex flex-wrap items-center gap-x-4 gap-y-1">
+				<span title="Consecutive betting days"
+					>🔥 <span class="num text-zinc-200">{state.user.streakDays}</span> day{state.user
+						.streakDays === 1
+						? ''
+						: 's'}</span
+				>
+				<span class="text-felt-700" aria-hidden="true">·</span>
+				<!-- The rank: compact on the strip, the full story in the tooltip. -->
+				<span class="nc-chip px-2.5 py-0.5" title={rankTitle}>
+					<span aria-hidden="true">🎖</span>
+					<span class="num">L{rank.level}</span>
+					<span class="text-felt-700" aria-hidden="true">·</span>
+					{rank.title}
+				</span>
+				<span class="text-felt-700" aria-hidden="true">·</span>
+				<span title="Experience points"
+					>XP <span class="num text-zinc-200">{formatNC(xp)}</span></span
+				>
+				<span class="text-felt-700" aria-hidden="true">·</span>
+				<span class="num">{formatNC(state.user.stats.betsPlaced)}</span> bet{state.user.stats
+					.betsPlaced === 1
 					? ''
-					: 's'}</span
-			>
-			<span class="text-felt-700" aria-hidden="true">·</span>
-			<span title="Experience points"
-				>XP <span class="num text-zinc-200">{formatNC(state.user.xp)}</span></span
-			>
-			<span class="text-felt-700" aria-hidden="true">·</span>
-			<span class="num">{formatNC(state.user.stats.betsPlaced)}</span> bet{state.user.stats
-				.betsPlaced === 1
-				? ''
-				: 's'} placed
+					: 's'} placed
+			</div>
+			<!-- Progress through this rung. Full bar (and no "to next") at Legend. -->
+			<div class="sm:ml-auto sm:w-40">
+				<div class="nc-xpbar" title={rankTitle}>
+					<span class="nc-xpbar-fill" style={`width:${Math.round(rankProgress * 100)}%`} />
+				</div>
+				<p class="mt-1 text-[10px] uppercase tracking-wide text-zinc-600">
+					{#if next && rankGap !== null}
+						<span class="num">{formatNC(rankGap)}</span> XP to {next.title}
+					{:else}
+						Top of the ladder
+					{/if}
+				</p>
+			</div>
 		</section>
 	{/if}
 
-	<PhaseBanner {phase} tradeDate={state.tradeDate} />
+	<PhaseBanner {phase} tradeDate={state.tradeDate} now={$nowIst} />
 
 	{#if $stateError}
-		<p class="nc-alert" role="alert">
+		<p class="nc-alert flex flex-wrap items-center gap-1" role="alert">
 			{$stateError} —
-			<button type="button" class="underline" on:click={() => void loadState()}>retry</button>
+			<button
+				type="button"
+				class="inline-flex min-h-[44px] items-center font-semibold underline"
+				on:click={() => void loadState()}>retry</button
+			>
 		</p>
 	{/if}
 
@@ -224,6 +273,7 @@
 					{phase}
 					{authed}
 					{balance}
+					loading={$stateLoading}
 					myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
 					expanded={expandedFor(underlying)}
 					on:toggle={() => toggleCard(underlying)}
