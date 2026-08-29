@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NseAPIError } from './nse-api';
 import { bseNum, classifyBseFailure, fetchBseSensexRows } from './bse-api';
+import { FeedBaseUrlError } from './feed-base-url';
 import { buildBseSensexRow } from './test-fixtures';
 
 const BSE_URL = 'https://api.bseindia.com/RealTimeBseIndiaAPI/api/GetSensexDatanew/w';
@@ -26,6 +27,10 @@ function stubFetch(impl: (url: string) => Promise<Response>): void {
 beforeEach(() => {
 	calls = [];
 	vi.unstubAllGlobals();
+});
+
+afterEach(() => {
+	vi.unstubAllEnvs();
 });
 
 describe('classifyBseFailure', () => {
@@ -103,5 +108,42 @@ describe('bseNum re-export parity', () => {
 	it('matches the extractor module definition', () => {
 		expect(bseNum('-')).toBe(0);
 		expect(bseNum('78,845.12')).toBe(78845.12);
+	});
+});
+
+describe('BSE_BASE_URL override (the residential-relay path)', () => {
+	const RELAY = 'http://mac.tail1234.ts.net:8081';
+
+	it('routes GetSensexDatanew through the override, trimming a trailing slash', async () => {
+		vi.stubEnv('BSE_BASE_URL', `${RELAY}/`);
+		stubFetch(async () => json([buildBseSensexRow()]));
+		const rows = await fetchBseSensexRows();
+		expect(calls[0].url).toBe(`${RELAY}/GetSensexDatanew/w`);
+		expect(rows).toHaveLength(1);
+	});
+
+	it('keeps Origin + Referer pinned to the real site and sends no cookies', async () => {
+		vi.stubEnv('BSE_BASE_URL', RELAY);
+		stubFetch(async () => json([buildBseSensexRow()]));
+		await fetchBseSensexRows();
+		const headers = new Headers(calls[0].init?.headers);
+		expect(headers.get('origin')).toBe('https://www.bseindia.com');
+		expect(headers.get('referer')).toBe(
+			'https://www.bseindia.com/markets/equity/closing_auction_session'
+		);
+		expect(headers.has('cookie')).toBe(false);
+	});
+
+	it('keeps the literal upstream URL when the variable is unset', async () => {
+		stubFetch(async () => json([buildBseSensexRow()]));
+		await fetchBseSensexRows();
+		expect(calls[0].url).toBe(BSE_URL);
+	});
+
+	it('fails loudly on an override without a scheme — never silently back at BSE', async () => {
+		vi.stubEnv('BSE_BASE_URL', 'mac.tail1234.ts.net:8081');
+		stubFetch(async () => json([buildBseSensexRow()]));
+		await expect(fetchBseSensexRows()).rejects.toBeInstanceOf(FeedBaseUrlError);
+		expect(calls).toHaveLength(0);
 	});
 });

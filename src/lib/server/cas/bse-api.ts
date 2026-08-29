@@ -12,6 +12,7 @@
  * Field names are read ONLY by `extractBseCasTick` in ./types — this module
  * hands back the raw rows as `unknown` so nothing upstream-shaped escapes.
  */
+import { BSE_BASE_URL_ENV, feedBaseUrl } from './feed-base-url';
 import { NseAPIError, type NseAPIErrorCode } from './nse-api';
 
 // `bseNum` is the pure BSE number parser; it lives with the other extractors so
@@ -20,6 +21,18 @@ export { bseNum } from './types';
 
 const BSE_API = 'https://api.bseindia.com/RealTimeBseIndiaAPI/api';
 const BSE_REFERER = 'https://www.bseindia.com/markets/equity/closing_auction_session';
+const BSE_ORIGIN = 'https://www.bseindia.com';
+
+/**
+ * Where `GetSensexDatanew` is fetched from — the real BSE API unless
+ * `BSE_BASE_URL` re-points it (the residential-relay path, PLAN §6 R1). Read per
+ * call so a restart is all it takes to switch. See ./feed-base-url for the
+ * semantics and for what the override deliberately leaves alone.
+ */
+function bseApiBase(): string {
+	return feedBaseUrl(process.env, BSE_BASE_URL_ENV, BSE_API);
+}
+
 const BROWSER_UA =
 	'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 const REQUEST_TIMEOUT_MS = 10000;
@@ -39,16 +52,20 @@ export function classifyBseFailure(
 
 /** Raw rows of `GetSensexDatanew` — feed these to `extractBseCasTick`. */
 export async function fetchBseSensexRows(): Promise<unknown[]> {
+	// Resolved before any I/O so a misconfigured `BSE_BASE_URL` is a configuration
+	// error that propagates unwrapped, rather than a fabricated network failure.
+	const base = bseApiBase();
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 	let res: Response;
 	try {
-		res = await fetch(`${BSE_API}/GetSensexDatanew/w`, {
+		res = await fetch(`${base}/GetSensexDatanew/w`, {
 			headers: {
 				'User-Agent': BROWSER_UA,
 				Accept: 'application/json, text/plain, */*',
 				'Accept-Language': 'en-US,en;q=0.9',
-				Origin: 'https://www.bseindia.com',
+				// Origin/Referer stay pinned to the real site — see ./feed-base-url.
+				Origin: BSE_ORIGIN,
 				Referer: BSE_REFERER
 			},
 			signal: controller.signal

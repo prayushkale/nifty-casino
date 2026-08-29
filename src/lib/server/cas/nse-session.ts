@@ -12,7 +12,19 @@
  * Never log cookie contents.
  */
 
+import { NSE_BASE_URL_ENV, feedBaseUrl } from './feed-base-url';
+
 const NSE_HOME = 'https://www.nseindia.com';
+
+/**
+ * Where the Akamai warm-up goes. `NSE_BASE_URL` re-points it along with the API
+ * calls, because the handshake warms the reputation of the *calling IP* — a warm-up
+ * from the blocked datacenter IP contributes nothing and burns its 15s timeout
+ * before every API call. See ./feed-base-url for the override's full semantics.
+ */
+function nseHome(): string {
+	return feedBaseUrl(process.env, NSE_BASE_URL_ENV, NSE_HOME);
+}
 
 export const NSE_BROWSER_UA =
 	'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -50,7 +62,7 @@ export async function getNseSession(): Promise<string> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), HANDSHAKE_TIMEOUT_MS);
 	try {
-		const res = await fetch(`${NSE_HOME}/`, {
+		const res = await fetch(`${nseHome()}/`, {
 			headers: {
 				'User-Agent': NSE_BROWSER_UA,
 				Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',

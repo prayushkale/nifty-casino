@@ -1,0 +1,82 @@
+# =============================================================================
+# NiftyCasino CI
+#
+# Gate order is deliberate: cheap static checks first (a typo fails in ~20s, not
+# after a full build), then the unit suite, then the build, then the EV gate.
+#
+# `sim:ev` is a BLOCKING gate, on purpose. It is a seeded Monte Carlo
+# (mulberry32, default seed 20260829) over computeTier, so it is deterministic and
+# fast (~seconds) — there is no flake to tolerate, and the thing it protects is
+# the house edge: a one-line edit to LADDER_CONFIG's odds that pushes an option's
+# EV above 1.0 is exactly the change that looks harmless and passes every other
+# gate. It already exits non-zero when an option is outside [0.85, 0.95], so the
+# gate is just "let the script decide".
+#
+# No deploy job: Tier 1 builds on the VM (deploy/install.md §3). This workflow is
+# the correctness gate, not the release pipeline.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel a superseded run on the same PR/branch: the newest result is the only
+# one anyone reads.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    name: check · lint · test · build · ev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # --include=dev matters: vite/sveltekit/typescript are devDependencies and
+      # the build cannot run without them. (Some machines' npm config omits dev
+      # deps by default; being explicit here means the gate is the same everywhere.)
+      - name: Install dependencies
+        run: npm ci --include=dev
+
+      - name: svelte-check (types)
+        run: npm run check
+
+      - name: prettier + eslint
+        run: npm run lint
+
+      - name: vitest
+        run: npm run test
+
+      - name: build (adapter-node)
+        run: npm run build
+
+      # BLOCKING — see the header. --quiet keeps the log to the verdict lines.
+      - name: EV launch gate (seeded Monte Carlo)
+        run: npm run sim:ev -- --quiet
+
+      # Prove the built server actually boots (the artefact, not the dev server).
+      # Deliberately launched with the in-memory store: no secrets in CI, and the
+      # poller/settle schedulers are VITEST-suppressed in the built output too
+      # (we set it explicitly so a future change cannot start a timer in CI).
+      - name: boot smoke (built server)
+        run: |
+          PORT=3111 VITEST=1 node build/index.js &
+          for i in $(seq 1 40); do
+            if curl -fsS -o /dev/null http://127.0.0.1:3111/; then
+              echo "server answered after ${i} attempt(s)"
+              curl -fsS -o /dev/null http://127.0.0.1:3111/api/state
+              echo "GET /api/state ok"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server did not answer on :3111"
+          exit 1

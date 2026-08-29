@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NSE_BROWSER_UA, getNseSession, resetNseSession } from './nse-session';
 
 const NSE_HOME = 'https://www.nseindia.com/';
@@ -30,6 +30,10 @@ beforeEach(() => {
 	calls = [];
 	resetNseSession();
 	vi.unstubAllGlobals();
+});
+
+afterEach(() => {
+	vi.unstubAllEnvs();
 });
 
 describe('getNseSession (Akamai warm-up)', () => {
@@ -84,6 +88,39 @@ describe('getNseSession (Akamai warm-up)', () => {
 
 	it('resolves to "" when the homepage answers 403 without cookies (Akamai challenge)', async () => {
 		stubFetch(async () => html('Access Denied', 403));
+		await expect(getNseSession()).resolves.toBe('');
+	});
+});
+
+describe('getNseSession under NSE_BASE_URL (the residential-relay path)', () => {
+	const RELAY = 'http://mac.tail1234.ts.net:8081';
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it('warms up through the override too — the handshake must egress from the relay’s IP', async () => {
+		vi.stubEnv('NSE_BASE_URL', `${RELAY}/`);
+		stubFetch(async () => withCookies('<html></html>'));
+		await expect(getNseSession()).resolves.toBe('nseappid=abc123; AKA_A2=A');
+		expect(calls[0].url).toBe(`${RELAY}/`);
+	});
+
+	it('keeps the handshake headers exactly as they are without an override', async () => {
+		vi.stubEnv('NSE_BASE_URL', RELAY);
+		stubFetch(async () => withCookies('<html></html>'));
+		await getNseSession();
+		const headers = new Headers(calls[0].init?.headers);
+		expect(headers.get('user-agent')).toBe(NSE_BROWSER_UA);
+		expect(headers.get('cache-control')).toBe('no-cache');
+		expect(headers.has('cookie')).toBe(false);
+	});
+
+	it('still resolves to "" (never throws) when the override base is unreachable', async () => {
+		vi.stubEnv('NSE_BASE_URL', 'http://127.0.0.1:9');
+		stubFetch(async () => {
+			throw new Error('ECONNREFUSED');
+		});
 		await expect(getNseSession()).resolves.toBe('');
 	});
 });

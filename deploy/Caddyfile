@@ -1,0 +1,120 @@
+# =============================================================================
+# NiftyCasino — Tier 1 reverse proxy (Caddy 2.x)
+#
+# Installs as /etc/caddy/Caddyfile. Replace EVERY occurrence of the placeholder
+# domain `cas.example.com`, then:
+#
+#     sudo systemctl reload caddy      # or `caddy run --config ...` to test first
+#     sudo caddy validate --config /etc/caddy/Caddyfile
+#
+# What this file is responsible for:
+#   • TLS (Caddy obtains and renews the Let's Encrypt cert automatically)
+#   • SSE: /api/stream must never be buffered, compressed or timed out mid-stream
+#   • gzip/zstd for everything else (HTML/JS/CSS/JSON)
+#   • the security headers the app deliberately does not set itself
+#   • access log on disk, rotated
+#
+# See deploy/install.md step 6 and docs/RUNBOOK.md → "Restart / upgrade".
+# =============================================================================
+
+{
+	# ---- global options -------------------------------------------------------
+	# Let's Encrypt expiry + issuance mail (recommended, one line):
+	# email you@example.com
+
+	# The admin endpoint is localhost-only by default; we do not need it remotely.
+	admin localhost:2019
+
+	# Access log for the whole site, on disk, rotated (Caddy rolls at 10 MiB).
+	log {
+		output file /var/log/caddy/access.log {
+			roll_size 10MiB
+			roll_keep 5
+			roll_keep_for 720h
+		}
+		# `level INFO` keeps the access log; drop to ERROR only if the disk is tight.
+	}
+}
+
+cas.example.com {
+	# --------------------------------------------------------------------------
+	# SSE — handled FIRST and separately from the compressed path.
+	#
+	# `flush_interval -1` makes Caddy push every byte the app writes the moment it
+	# is written. Without it a proxy may sit on the stream until its buffer fills
+	# (or until the 15s heartbeat), and every client falls back to REST polling
+	# (src/lib/config/app.ts → CAS_FALLBACK_POLL_MS) — which looks like "the charts
+	# are lagging" and nothing else. `encode` is deliberately NOT applied here:
+	# gzipping an event stream buffers it exactly the same way.
+	# --------------------------------------------------------------------------
+	@sse path /api/stream
+	handle @sse {
+		reverse_proxy 127.0.0.1:3000 {
+			flush_interval -1
+			# Do not let the transport time out an idle (heartbeat-only) stream.
+			transport http {
+				response_header_timeout 0
+			}
+		}
+	}
+
+	# --------------------------------------------------------------------------
+	# Everything else — compressed, cached-by-nothing, proxied as-is.
+	# --------------------------------------------------------------------------
+	handle {
+		encode zstd gzip
+
+		header {
+			# ---- security headers -------------------------------------------
+			X-Content-Type-Options nosniff
+			X-Frame-Options DENY
+			Referrer-Policy strict-origin-when-cross-origin
+			# Caddy sends no Server header; this is here so nobody "helpfully" adds one.
+			# (No CSP: Tailwind ships inline styles. Add one when the bundle is
+			#  nonce-ready — a broken CSP is worse than none.)
+			# HSTS: only enable once TLS is permanent for this host.
+			# Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		}
+
+		# ---- caching -----------------------------------------------------------
+		# Two mutually exclusive matchers, so the order never matters: SvelteKit's
+		# hashed build assets are fingerprinted and immutable — cache them hard —
+		# and everything else is per-request state (balances, pots, SSE cursors)
+		# that nothing between Caddy and the browser may cache.
+		@immutable path /_app/immutable/*
+		header @immutable Cache-Control "public, max-age=31536000, immutable"
+		@notImmutable not path /_app/immutable/*
+		header @notImmutable Cache-Control "no-store"
+
+		reverse_proxy 127.0.0.1:3000
+	}
+}
+
+# =============================================================================
+# OPTIONAL: Cloudflare in front of Caddy (PLAN §6 — recommended from day 1 for
+# free TLS/CDN/DDoS, mandatory at Tier 2).
+#
+# 1. Point the DNS record at Cloudflare (orange cloud ON) and set the origin to
+#    this VM. Keep Caddy's automatic TLS (or switch to `tls internal` + a CF
+#    Origin CA cert so the origin never speaks plain HTTP).
+# 2. Tell Caddy which header carries the real client IP, and that Cloudflare is a
+#    trusted proxy — otherwise every player logs as 127.0.0.1 / a CF edge IP and
+#    rate-limit/abuse work in the app becomes impossible:
+#
+# {
+# 	servers {
+# 		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 \
+# 			103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 \
+# 			188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 \
+# 			104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22
+# 		client_ip_headers CF-Connecting-IP X-Forwarded-For
+# 	}
+# }
+#
+#    (Keep those ranges current — https://www.cloudflare.com/ips/ — or pin the
+#     origin to a Cloudflare Tunnel and skip the range list entirely.)
+# 3. SSE over Cloudflare works, but the free plan caps a single connection at
+#    ~100s of idle: our 15s heartbeat (SSE_HEARTBEAT_MS) keeps it alive. If clients
+#    ever report a 30s reconnect rhythm through Cloudflare, raise the heartbeat
+#    before assuming the app is at fault.
+# =============================================================================

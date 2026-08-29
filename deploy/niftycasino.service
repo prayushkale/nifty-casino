@@ -1,0 +1,96 @@
+# =============================================================================
+# NiftyCasino — systemd unit (Tier 1: one node, adapter-node)
+#
+#   sudo cp deploy/niftycasino.service /etc/systemd/system/niftycasino.service
+#   sudo cp deploy/niftycasino.env.example /opt/niftycasino/deploy/niftycasino.env
+#   sudo chmod 600 /opt/niftycasino/deploy/niftycasino.env
+#   sudo chown -R niftycasino:niftycasino /opt/niftycasino
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now niftycasino
+#   journalctl -u niftycasino -f
+#
+# Deliberate choices (do not "simplify" these away):
+#   • Restart=always + RestartSec=3 — a crashed server must come back on its own,
+#     and 3s is short enough that a restart inside the 15:13:30–15:42 window only
+#     loses one 4s poll. Restart=always (not on-failure) covers a clean exit too.
+#   • TimeoutStopSec=45 > the adapter's SHUTDOWN_TIMEOUT=30 — the app drains SSE
+#     connections on SIGTERM; systemd must not SIGKILL it mid-drain.
+#   • MemoryDenyWriteExecute is deliberately NOT set. It is the most common
+#     hardening flag in copy-pasted Node units and it breaks V8's JIT (the process
+#     dies with SIGTRAP on first compile). Everything else here is safe.
+#   • No ReadWritePaths: the app writes nothing to disk. Ticks go to Postgres,
+#     logs to journald. `ProtectSystem=strict` therefore costs nothing, and the
+#     absence of a writable path is itself a property worth keeping.
+# =============================================================================
+[Unit]
+Description=NiftyCasino (SvelteKit adapter-node)
+Documentation=file:/opt/niftycasino/docs/RUNBOOK.md
+# network-online: startup must not race DHCP; the poller and the DB pool both
+# open sockets at boot and neither should see a half-up interface.
+After=network-online.target
+Wants=network-online.target
+# Refuse to "start" into a broken deploy: a missing build is an error, not a crash loop.
+AssertPathExists=/opt/niftycasino/build/index.js
+
+[Service]
+Type=simple
+User=niftycasino
+Group=niftycasino
+WorkingDirectory=/opt/niftycasino
+ExecStart=/usr/bin/node build/index.js
+Environment=NODE_ENV=production
+Environment=PORT=3000
+# Caddy is the only thing that talks to the app, so bind to loopback only — the
+# node process must never be reachable from the internet directly.
+Environment=HOST=127.0.0.1
+# Secrets + per-deploy config. Never commit the real file.
+EnvironmentFile=/opt/niftycasino/deploy/niftycasino.env
+
+# ---- lifecycle -------------------------------------------------------------
+Restart=always
+RestartSec=3
+# SIGTERM (the adapter's graceful-shutdown signal) → wait out the SSE drain → SIGKILL.
+KillSignal=SIGTERM
+TimeoutStopSec=45
+# sd_notify watchdog (WatchdogSec=) is NOT wired up: the adapter never calls
+# sd_notify. Feed liveness is the watchdog timer's job — see deploy/watchdog.timer.
+
+# ---- resources (t3.small: 2 GiB total, Caddy + node + cron live here too) ---
+MemoryMax=700M
+MemoryHigh=550M
+# SSE fan-out holds one socket per client: 10k conns needs more than the 1024 default.
+LimitNOFILE=16384
+# Keep the V8 heap well under MemoryMax so a busy settle chunk OOMs in JS (a
+# handled error) rather than in the kernel (a killed service).
+Environment=NODE_OPTIONS=--max-old-space-size=512
+
+# ---- hardening -------------------------------------------------------------
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+# ProcSubset=pid is deliberately NOT set: it hides /proc/cpuinfo, and libuv then
+# reports 0 CPUs — which sizes V8's GC and thread pools down to 1 and makes the
+# settlement burst (PLAN §6 R7) pointlessly slow.
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+# NOT set on purpose: MemoryDenyWriteExecute=true breaks the V8 JIT (see header).
+# If you add a writable data dir later, add ReadWritePaths= for exactly that dir.
+
+[Install]
+WantedBy=multi-user.target

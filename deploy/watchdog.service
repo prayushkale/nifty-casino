@@ -1,0 +1,43 @@
+# =============================================================================
+# NiftyCasino feed watchdog — the service half of deploy/watchdog.timer
+#
+#   sudo cp deploy/watchdog.sh /usr/local/bin/niftycasino-watchdog.sh
+#   sudo chmod 755 /usr/local/bin/niftycasino-watchdog.sh
+#   sudo cp deploy/watchdog.service deploy/watchdog.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now niftycasino-watchdog.timer
+#   systemctl list-timers niftycasino-watchdog.timer
+#
+# Type=oneshot + RemainOnExit semantics: a failure shows up as a failed unit, so
+# `systemctl --failed` is a second, free monitoring surface.
+# =============================================================================
+[Unit]
+Description=NiftyCasino feed watchdog (one probe of /api/nse/health)
+Documentation=file:/opt/niftycasino/docs/RUNBOOK.md
+# Probe the app, not the proxy: 127.0.0.1 bypasses Caddy so a TLS/DNS problem and
+# a feed problem fail differently. Point WATCHDOG_BASE_URL at the public URL if
+# you would rather monitor the whole path through Caddy.
+After=network-online.target niftycasino.service
+Wants=niftycasino.service
+
+[Service]
+Type=oneshot
+User=niftycasino
+Group=niftycasino
+ExecStart=/usr/local/bin/niftycasino-watchdog.sh
+# Generous: the probe itself may legitimately run ~30s.
+TimeoutStartSec=120
+# Where the alert cooldown stamp lives (see watchdog.sh).
+Environment=WATCHDOG_STATE_DIR=/var/lib/niftycasino-watchdog
+Environment=WATCHDOG_LOG=/var/log/niftycasino/watchdog.log
+# --- optional: un-comment and fill in to page when the feed goes down --------
+# (ntfy shown; any URL that accepts a POST body works — Slack, Discord, PagerDuty)
+#Environment=WATCHDOG_ALERT_URL=https://ntfy.sh/<your-private-topic>
+#Environment=WATCHDOG_COOLDOWN_MINS=60
+#Environment=WATCHDOG_DEEP=0
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/niftycasino /var/lib/niftycasino-watchdog

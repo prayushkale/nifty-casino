@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
 import {
 	NseAPIError,
 	classifyNseFailure,
@@ -8,6 +8,7 @@ import {
 	nseInFlightCount,
 	probeNseHealth
 } from './nse-api';
+import { FeedBaseUrlError } from './feed-base-url';
 import { resetNseSession } from './nse-session';
 import {
 	buildMarketStatusResponse,
@@ -43,6 +44,10 @@ beforeEach(() => {
 	calls = [];
 	resetNseSession();
 	vi.unstubAllGlobals();
+});
+
+afterEach(() => {
+	vi.unstubAllEnvs();
 });
 
 describe('classifyNseFailure (Akamai/HTML classification)', () => {
@@ -226,5 +231,69 @@ describe('probeNseHealth (watchdog probe)', () => {
 		const degraded = await probeNseHealth({ deep: true });
 		expect(degraded.ok).toBe(false);
 		expect(degraded.detail).toContain('E1');
+	});
+});
+
+describe('NSE_BASE_URL override (the residential-relay path)', () => {
+	const RELAY = 'http://mac.tail1234.ts.net:8081';
+
+	it('routes E1 through the override, keeping the path and the literal && intact', async () => {
+		vi.stubEnv('NSE_BASE_URL', `${RELAY}/`);
+		stubFetch(async (url) =>
+			url.includes('apiClient') ? json(buildNseIndexDataResponse()) : html('')
+		);
+		await fetchIndexData();
+		expect(apiCalls('apiClient').map((c) => c.url)).toEqual([
+			`${RELAY}/api/NextApi/apiClient?functionName=getIndexData&&type=All`
+		]);
+	});
+
+	it('sends the Akamai warm-up to the same base — the handshake warms the calling IP', async () => {
+		vi.stubEnv('NSE_BASE_URL', RELAY);
+		const mock = stubFetch(async (url) =>
+			url.includes('apiClient') ? json(buildNseIndexDataResponse()) : html('')
+		);
+		await fetchIndexData();
+		expect(calls[0].url).toBe(`${RELAY}/`);
+		expect(mock).toHaveBeenCalledTimes(2);
+	});
+
+	it('keeps the Referer pinned to the real origin while the socket points at the relay', async () => {
+		vi.stubEnv('NSE_BASE_URL', RELAY);
+		stubFetch(async (url) =>
+			url.includes('apiClient') ? json(buildNseIndexDataResponse()) : html('')
+		);
+		await fetchIndexData();
+		const headers = new Headers(apiCalls('apiClient')[0].init?.headers);
+		expect(headers.get('referer')).toBe('https://www.nseindia.com/');
+		expect(headers.get('user-agent')).toContain('Mozilla/5.0');
+		expect(headers.has('cookie')).toBe(false);
+	});
+
+	it('re-points E3 (the watchdog probe) too', async () => {
+		vi.stubEnv('NSE_BASE_URL', RELAY);
+		stubFetch(async (url) =>
+			url.includes('marketStatus') ? json(buildMarketStatusResponse()) : html('')
+		);
+		await probeNseHealth();
+		expect(apiCalls('marketStatus').map((c) => c.url)).toEqual([`${RELAY}/api/marketStatus`]);
+	});
+
+	it('leaves production untouched when the variable is unset', async () => {
+		stubFetch(async (url) =>
+			url.includes('apiClient') ? json(buildNseIndexDataResponse()) : html('')
+		);
+		await fetchIndexData();
+		expect(apiCalls('apiClient')[0].url).toBe(E1_URL);
+		expect(calls[0].url).toBe(NSE_HOME);
+	});
+
+	it('fails loudly on an override without a scheme — never silently back at NSE', async () => {
+		vi.stubEnv('NSE_BASE_URL', 'mac.tail1234.ts.net:8081');
+		stubFetch(async () => json(buildNseIndexDataResponse()));
+		await expect(fetchIndexData()).rejects.toBeInstanceOf(FeedBaseUrlError);
+		// not one byte left the process: no warm-up, no API call, and no accidental
+		// request to the real NSE from a blocked IP
+		expect(calls).toHaveLength(0);
 	});
 });

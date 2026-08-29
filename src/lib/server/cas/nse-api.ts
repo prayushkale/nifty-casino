@@ -14,11 +14,29 @@
  * Raw upstream JSON is returned as `unknown`; only `../cas/types` extractors
  * know NSE field names, so nothing upstream-shaped can leak into a response.
  */
+import { NSE_BASE_URL_ENV, feedBaseUrl } from './feed-base-url';
 import { getNseSession, resetNseSession, NSE_BROWSER_UA } from './nse-session';
 import { extractNseMarketStatusOk } from './types';
 
 const NSE_API = 'https://www.nseindia.com';
 const REQUEST_TIMEOUT_MS = 8000;
+
+/**
+ * Where E1/E3 are fetched from — `https://www.nseindia.com` unless `NSE_BASE_URL`
+ * re-points them (the residential-relay path, PLAN §6 R1). Read per call so a
+ * restart is all it takes to switch. See ./feed-base-url for the semantics and for
+ * what the override deliberately leaves alone.
+ */
+function nseApiBase(): string {
+	return feedBaseUrl(process.env, NSE_BASE_URL_ENV, NSE_API);
+}
+
+/**
+ * Referer is PINNED to the real origin and does not follow `NSE_BASE_URL`: Akamai
+ * validates it against the site it is serving, and a relay rewrites Host itself,
+ * so the header must keep naming nseindia.com even when the socket does not.
+ */
+const NSE_REFERER_ORIGIN = NSE_API;
 
 export type NseAPIErrorCode = 'AUTH' | 'BLOCKED' | 'TIMEOUT' | 'NETWORK' | 'PARSE';
 
@@ -85,6 +103,10 @@ function releaseNseSlot(): void {
 }
 
 async function nseFetchJson(path: string): Promise<unknown> {
+	// Resolved before the semaphore and before any I/O: a misconfigured
+	// `NSE_BASE_URL` is a configuration error, not a network failure, so it
+	// propagates unwrapped (and holds no concurrency slot while it does).
+	const base = nseApiBase();
 	await acquireNseSlot();
 	try {
 		// Warm the Akamai session/IP reputation; cookies are deliberately NOT
@@ -94,12 +116,12 @@ async function nseFetchJson(path: string): Promise<unknown> {
 		const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 		let res: Response;
 		try {
-			res = await fetch(`${NSE_API}${path}`, {
+			res = await fetch(`${base}${path}`, {
 				headers: {
 					'User-Agent': NSE_BROWSER_UA,
 					Accept: 'application/json, text/plain, */*',
 					'Accept-Language': 'en-US,en;q=0.9',
-					Referer: `${NSE_API}/`
+					Referer: `${NSE_REFERER_ORIGIN}/`
 					// NB: deliberately NO Cookie header. From a residential IP the APIs
 					// answer without cookies; the handshake's ak_bmsc/bm_sv cookies are
 					// JS-bound and CHALLENGE the API calls when forwarded (verified live

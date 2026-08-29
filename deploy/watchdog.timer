@@ -1,0 +1,30 @@
+# =============================================================================
+# NiftyCasino feed watchdog — run every 5 minutes (deploy/watchdog.service)
+#
+# WHY 5 MINUTES: the poller only needs the feed 15:13:30–15:42 IST, but a blocked
+# IP does not announce itself, and a manual settle at 15:43 is far too late to
+# discover one. 288 probes a day is still a rounding error for NSE's front door,
+# and each probe warms the Akamai session the poller reuses. Do not go faster
+# than this — a tighter cadence from a datacenter IP is exactly the traffic
+# pattern Akamai blocks for.
+#
+# DO NOT run this timer from a laptop or any other IP: mixing egress IPs makes
+# the probe's verdict meaningless (PLAN §6 R1) and adds a second Akamai
+# reputation to manage. One IP probes the feed; the VM's.
+# =============================================================================
+[Unit]
+Description=Run the NiftyCasino feed watchdog every 5 minutes
+Documentation=file:/opt/niftycasino/docs/RUNBOOK.md
+
+[Timer]
+# Every 5 minutes, on the clock (*/5 keeps the log lines easy to grep by minute).
+OnCalendar=*:0/5
+# A VM that was off/suspended still gets a probe as soon as it comes back.
+Persistent=true
+# Do not fire 288 probes at exactly :00 of the minute.
+RandomizedDelaySec=20
+AccuracySec=5s
+Unit=niftycasino-watchdog.service
+
+[Install]
+WantedBy=timers.target
