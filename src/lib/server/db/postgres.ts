@@ -513,6 +513,16 @@ function createRepos(sql: SqlClient): TxStore {
 				order by b.created_at asc, b.id asc`;
 			return rows.map(mapBet);
 		},
+		// The public profile strip (T10). `settled_at is not null` keeps open bets out;
+		// the explicit LIMIT is the caller's bound, never a driver default.
+		listRecentSettledBets: async (userId, limit) => {
+			const rows = await sql`
+				select * from bets
+				where user_id = ${userId} and settled_at is not null
+				order by settled_at desc, created_at desc, id desc
+				limit ${Math.max(0, limit)}`;
+			return rows.map(mapBet);
+		},
 		listBetsForSession: async (sessionId) => {
 			const rows = await sql`
 				select * from bets where session_id = ${sessionId}

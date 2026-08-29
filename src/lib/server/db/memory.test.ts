@@ -14,6 +14,8 @@ import {
 } from './interface';
 import { MemoryStore } from './memory';
 import type { GameStore } from './interface';
+import type { Underlying } from './types';
+import { shiftIstDate } from '$lib/time/ist';
 
 const DATE = '2026-08-27';
 const CUTOFF = Date.parse('2026-08-27T09:50:00.000Z'); // 15:20:00 IST
@@ -331,6 +333,122 @@ describe('MemoryStore', () => {
 			expect((await store.bets.getBetsForUserOnDate('u1', DATE)).length).toBe(1);
 			expect((await store.bets.getBetsForUserOnDate('u2', DATE)).length).toBe(1);
 			expect((await store.bets.getBetsForUserOnDate('u1', '2020-01-01')).length).toBe(0);
+		});
+	});
+
+	// ------------------------------------------- bets: the public profile reader
+
+	describe('bets.listRecentSettledBets', () => {
+		const UNDERLYINGS: Underlying[] = ['nifty', 'banknifty', 'sensex'];
+		/** Settlement stamps: 1s apart, so ordering is unambiguous. */
+		const BASE = Date.parse('2026-08-17T10:15:00.000Z');
+
+		/** A store with its own clock, so placement order is observable. */
+		async function clockedStore(): Promise<{ store: GameStore; tick: () => void }> {
+			let clock = Date.parse('2026-08-17T09:00:00.000Z');
+			const store = new MemoryStore({ now: () => clock });
+			await store.profiles.insertProfile({
+				userId: 'u1',
+				handle: 'priya',
+				email: 'p@x.dev',
+				balance: 10_000
+			});
+			await store.profiles.insertProfile({
+				userId: 'u2',
+				handle: 'arjun',
+				email: 'a@x.dev',
+				balance: 10_000
+			});
+			return { store, tick: () => (clock += 1_000) };
+		}
+
+		async function settleOne(
+			store: GameStore,
+			userId: string,
+			tradeDate: string,
+			underlying: Underlying,
+			settledAt: number
+		): Promise<void> {
+			const session = await store.sessions.ensureSession(
+				tradeDate,
+				Date.parse(`${tradeDate}T09:50:00.000Z`)
+			);
+			await store.tx(async (t) => {
+				const bet = await t.bets.upsertBet({
+					userId,
+					sessionId: session.id,
+					underlying,
+					targetKind: 'up',
+					deltaPoints: 50,
+					odds: 6,
+					stake: 10
+				});
+				await t.bets.setBetOutcome(bet.id, 'hit', 60, settledAt);
+			});
+		}
+
+		it('returns only settled bets, newest settlement first, and never another player’s', async () => {
+			const { store } = await clockedStore();
+			const day1 = '2026-08-17';
+			const day2 = '2026-08-18';
+
+			await settleOne(store, 'u1', day1, 'nifty', BASE);
+			await settleOne(store, 'u1', day2, 'banknifty', BASE + 1_000);
+			await settleOne(store, 'u2', day2, 'sensex', BASE + 2_000);
+			// An open bet is a live position, not a result — it stays off the strip.
+			const session = await store.sessions.ensureSession(day1, CUTOFF);
+			await store.tx((t) =>
+				t.bets.upsertBet({
+					userId: 'u1',
+					sessionId: session.id,
+					underlying: 'sensex',
+					targetKind: 'down',
+					deltaPoints: 250,
+					odds: 4.5,
+					stake: 10
+				})
+			);
+
+			const bets = await store.bets.listRecentSettledBets('u1', 20);
+			expect(bets.map((bet) => bet.underlying)).toEqual(['banknifty', 'nifty']);
+			expect(bets.every((bet) => bet.settledAt !== null)).toBe(true);
+			expect(await store.bets.listRecentSettledBets('u2', 20)).toHaveLength(1);
+		});
+
+		it('breaks a settlement-time tie by placement order, newest first', async () => {
+			const { store } = await clockedStore();
+			// One day settles in a single instant, so three bets share a settled_at;
+			// the tie-break is the order they were placed in.
+			await settleOne(store, 'u1', '2026-08-17', 'nifty', BASE);
+			await settleOne(store, 'u1', '2026-08-17', 'banknifty', BASE);
+			await settleOne(store, 'u1', '2026-08-17', 'sensex', BASE);
+
+			const bets = await store.bets.listRecentSettledBets('u1', 20);
+			expect(bets.map((bet) => bet.underlying)).toEqual(['sensex', 'banknifty', 'nifty']);
+		});
+
+		it('caps at the limit and keeps the newest settlements', async () => {
+			const { store, tick } = await clockedStore();
+
+			// 7 days × 3 indices = 21 settled bets, one more than the strip shows.
+			let sequence = 0;
+			for (let day = 0; day < 7; day += 1) {
+				tick();
+				const tradeDate = shiftIstDate('2026-08-17', day);
+				for (const underlying of UNDERLYINGS) {
+					await settleOne(store, 'u1', tradeDate, underlying, BASE + sequence * 1_000);
+					sequence += 1;
+				}
+			}
+
+			const bets = await store.bets.listRecentSettledBets('u1', 20);
+			expect(bets).toHaveLength(20);
+			expect(bets.map((bet) => bet.settledAt)).toEqual(
+				[...bets.map((bet) => bet.settledAt)].sort((a, b) => (b ?? 0) - (a ?? 0))
+			);
+			// The first bet of day 0 is the one that fell off the end.
+			expect(bets.at(-1)?.settledAt).toBe(BASE + 1_000);
+			expect(await store.bets.listRecentSettledBets('u1', 1000)).toHaveLength(21);
 		});
 	});
 

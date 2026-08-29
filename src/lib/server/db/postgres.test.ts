@@ -528,6 +528,82 @@ describeIntegration('PostgresStore (integration)', () => {
 		]);
 	});
 
+	it('reads the public profile strip: settled only, newest settlement first, capped', async () => {
+		// Six settled bets across two sessions (the per-day unique key caps a player
+		// at three) plus one left open and one belonging to somebody else.
+		const BASE = Date.parse('2099-12-31T10:15:00.000Z');
+		const other = '00000000-0000-4000-8000-00000000d002';
+		const firstDay = await store.sessions.ensureSession(DATE, CUTOFF);
+		const secondDay = await store.sessions.ensureSession('2099-12-30', CUTOFF);
+		const ids: string[] = [];
+
+		for (const sessionId of [firstDay.id, secondDay.id]) {
+			for (const underlying of ['nifty', 'banknifty', 'sensex'] as const) {
+				const bet = await store.tx((t) =>
+					t.bets.upsertBet({
+						userId: USER,
+						sessionId,
+						underlying,
+						targetKind: 'up',
+						deltaPoints: 50,
+						odds: 6,
+						stake: 10
+					})
+				);
+				ids.push(bet.id);
+				await store.tx(async (t) => {
+					// Settlement instants a second apart. The reader's ordering rests on
+					// `settled_at`, which one day normally shares with itself.
+					await t.bets.setBetOutcome(bet.id, 'hit', 60, BASE + ids.length * 1_000);
+					await t.stats.applyStatsDelta(USER, { betsPlaced: 1, betsWon: 1, totalWon: 60 });
+				});
+			}
+		}
+
+		const open = await store.tx((t) =>
+			t.bets.upsertBet({
+				userId: USER,
+				sessionId: secondDay.id,
+				underlying: 'nifty',
+				targetKind: 'down',
+				deltaPoints: 100,
+				odds: 4.5,
+				stake: 10
+			})
+		);
+		await store.tx((t) =>
+			t.bets.upsertBet({
+				userId: other,
+				sessionId: secondDay.id,
+				underlying: 'sensex',
+				targetKind: 'up',
+				deltaPoints: 150,
+				odds: 6,
+				stake: 10
+			})
+		);
+
+		const capped = await store.bets.listRecentSettledBets(USER, 4);
+		expect(capped).toHaveLength(4);
+		expect(capped.every((bet) => bet.userId === USER && bet.settledAt !== null)).toBe(true);
+		expect(capped.map((bet) => bet.settledAt)).toEqual(
+			[...capped.map((bet) => bet.settledAt)].sort((a, b) => (b ?? 0) - (a ?? 0))
+		);
+		// The cap keeps the NEWEST four of the six.
+		expect(capped.at(-1)?.settledAt).toBe(BASE + 3_000);
+
+		const uncapped = await store.bets.listRecentSettledBets(USER, 100);
+		expect(uncapped).toHaveLength(6);
+		expect(uncapped[0]?.settledAt).toBe(BASE + 6_000);
+		expect(uncapped.some((bet) => bet.id === open.id)).toBe(false);
+
+		// This test's own throwaways: the second session and the stranger in it.
+		// USER's rows on DATE are the afterAll cleanup's job.
+		await sql`delete from user_stats where user_id = ${other}`;
+		await sql`delete from bets where session_id = ${secondDay.id}`;
+		await sql`delete from daily_sessions where id = ${secondDay.id}`;
+	});
+
 	it('upserts a bet on (user, session, underlying) instead of adding a second row', async () => {
 		const session = await store.sessions.getSessionByDate(DATE);
 		const first = await store.tx(async (t) =>

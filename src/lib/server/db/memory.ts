@@ -66,6 +66,14 @@ const tickKey = (tradeDate: string, underlying: Underlying): string => `${tradeD
 const byCreatedThenId = (a: Bet, b: Bet): number =>
 	a.createdAt - b.createdAt || a.id.localeCompare(b.id);
 
+/**
+ * Newest settlement first, the exact inverse of the reader contract on
+ * {@link BetRepo.listRecentSettledBets}: `settled_at` wins, and because one day
+ * settles in a single instant, placement order breaks the tie.
+ */
+const bySettledDesc = (a: Bet, b: Bet): number =>
+	(b.settledAt ?? 0) - (a.settledAt ?? 0) || b.createdAt - a.createdAt || b.id.localeCompare(a.id);
+
 export type MemoryStoreOptions = {
 	/** Injectable clock — tests pin it so `createdAt`/`updatedAt` are deterministic. */
 	now?: () => number;
@@ -240,6 +248,12 @@ export class MemoryStore implements GameStore {
 			if (!session) return [];
 			return (await this.betRepo.listBetsForSession(session.id)).filter((b) => b.userId === userId);
 		},
+		// The public profile strip (T10): outcomes only, capped by the caller.
+		listRecentSettledBets: async (userId, limit) =>
+			[...this.betsById.values()]
+				.filter((b) => b.userId === userId && b.settledAt !== null)
+				.sort(bySettledDesc)
+				.slice(0, Math.max(0, limit)),
 		listBetsForSession: async (sessionId) =>
 			[...this.betsById.values()].filter((b) => b.sessionId === sessionId).sort(byCreatedThenId),
 		upsertBet: async (input) => {

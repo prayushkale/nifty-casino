@@ -229,6 +229,17 @@ export type BetRepo = {
 	getBetById(betId: string): Promise<Bet | null>;
 	/** Every bet a user placed on one IST date (edit/cancel UI + history). */
 	getBetsForUserOnDate(userId: string, tradeDate: string): Promise<Bet[]>;
+	/**
+	 * The public profile page's "recent bets" strip (T10): this user's last `limit`
+	 * SETTLED bets, newest settlement first. Open bets are deliberately excluded —
+	 * the game page owns today's live positions, a public page shows outcomes.
+	 *
+	 * Ordering is `settled_at desc, created_at desc, id desc`: a whole trading day
+	 * settles in one instant, so a day's own bets are ordered by when they were
+	 * placed. `limit` has no default on purpose — a public endpoint must state its
+	 * own bound rather than inherit one from the driver.
+	 */
+	listRecentSettledBets(userId: string, limit: number): Promise<Bet[]>;
 	/** Settlement scan — the settlement engine iterates a session's bets in chunks. */
 	listBetsForSession(sessionId: number): Promise<Bet[]>;
 	/**
