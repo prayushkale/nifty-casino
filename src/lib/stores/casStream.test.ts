@@ -922,7 +922,15 @@ describe('reconnect + fallback behaviour', () => {
 		const { fetch, calls } = fakeFetch([snapshot(), backfilled]);
 		let stop: (() => void) | null = null;
 		try {
-			stop = startCasStream({ EventSourceCtor: ctor, fetchImpl: fetch, storage: null });
+			// Clock injection: `now` must sit inside the DAY auction window or the wire
+			// layer's post-auction freeze swallows the reconnect deltas (wall-clock bug
+			// — these two passed only when vitest ran during 15:13:30–15:42 IST).
+			stop = startCasStream({
+				EventSourceCtor: ctor,
+				fetchImpl: fetch,
+				storage: null,
+				now: () => at(15, 14, 30)
+			});
 			const es = FakeEventSource.instances[0];
 			es.open();
 			es.emit('hello', snapshot({ bufferedFrom: at(15, 13, 30) }), String(at(15, 13, 30)));
@@ -1005,7 +1013,13 @@ describe('reconnect + fallback behaviour', () => {
 		const { fetch } = fakeFetch();
 		let stop: (() => void) | null = null;
 		try {
-			stop = startCasStream({ EventSourceCtor: ctor, fetchImpl: fetch, storage: null });
+			// Fixed in-window clock — see the reconnect test above for why.
+			stop = startCasStream({
+				EventSourceCtor: ctor,
+				fetchImpl: fetch,
+				storage: null,
+				now: () => at(15, 14, 30)
+			});
 			const es = FakeEventSource.instances[0];
 			es.open();
 			es.emit('hello', snapshot(), '0');
