@@ -1,4 +1,14 @@
 <script lang="ts">
+	import { LADDER_CONFIG, LADDER_UNDERLYINGS } from '$lib/config/ladder';
+
+	/** Highest odds on the board, derived — this copy must never drift from the config. */
+	const maxOdds = Math.max(
+		...LADDER_UNDERLYINGS.flatMap((u) => Object.values(LADDER_CONFIG[u].odds))
+	);
+	const minOdds = Math.min(
+		...LADDER_UNDERLYINGS.flatMap((u) => Object.values(LADDER_CONFIG[u].odds))
+	);
+
 	/** Short, static, honest. T13 may restyle it; the words stay plain on purpose. */
 	const terms: { heading: string; body: string }[] = [
 		{
@@ -36,7 +46,7 @@
 		{
 			outcome: '🎯 Hit',
 			condition: 'Right direction, and the close lands inside the target band.',
-			result: 'Your stake × the odds on the rung you picked (up to 6×).'
+			result: `Your stake × the odds on the rung you picked (up to ${maxOdds}×).`
 		},
 		{
 			outcome: '➖ Flat',
@@ -83,9 +93,9 @@
 			{/each}
 		</ul>
 		<p class="mt-4 text-xs text-zinc-500">
-			The odds for a given target (3.2× to 6×) are shown on the ladder chip and repeated on the
-			confirm screen before any stake is taken. One bet per index per day; bets can be edited or
-			cancelled until the 15:20 IST cutoff.
+			The odds for a given target ({minOdds}× to {maxOdds}×) are shown on the ladder chip and
+			repeated on the confirm screen before any stake is taken. One bet per index per day; bets can
+			be edited or cancelled until the 15:20 IST cutoff.
 		</p>
 	</section>
 
