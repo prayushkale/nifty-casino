@@ -14,7 +14,8 @@
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"test": "vitest run",
-		"test:watch": "vitest"
+		"test:watch": "vitest",
+		"sim:ev": "tsx scripts/simulate-ev.ts"
 	},
 	"dependencies": {
 		"@supabase/ssr": "^0.12.5",

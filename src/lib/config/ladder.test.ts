@@ -45,10 +45,10 @@ describe('LADDER_CONFIG', () => {
 		}
 	});
 
-	it('keeps the launch odds table (PLAN §0.2)', () => {
-		expect(LADDER_CONFIG.nifty.odds).toEqual({ 50: 6, 100: 4.5, 150: 3.8, 200: 3.2 });
-		expect(LADDER_CONFIG.banknifty.odds).toEqual({ 100: 6, 200: 4.5, 300: 3.8, 400: 3.2 });
-		expect(LADDER_CONFIG.sensex.odds).toEqual({ 150: 6, 250: 4.5, 400: 3.8, 500: 3.2 });
+	it('keeps the simulated launch odds table (Task 15 gate, not the PLAN §0.2 draft)', () => {
+		expect(LADDER_CONFIG.nifty.odds).toEqual({ 50: 13.9, 100: 15.2, 150: 17.9, 200: 22.4 });
+		expect(LADDER_CONFIG.banknifty.odds).toEqual({ 100: 18.3, 200: 19.1, 300: 21.3, 400: 24 });
+		expect(LADDER_CONFIG.sensex.odds).toEqual({ 150: 17.2, 250: 17.8, 400: 20.3, 500: 22.4 });
 	});
 
 	it('keeps SENSEX free of a 300 step — its round-number spacing skips it', () => {
@@ -69,11 +69,16 @@ describe('LADDER_CONFIG', () => {
 		expect(deadZoneHalfStep('sensex')).toBe(75);
 	});
 
-	it('pays more for the harder (tighter) targets, so odds fall as steps grow', () => {
+	it('pays more for the further targets: a fixed-width band is a sliver of the tail', () => {
+		// Task 15's simulator is why this is the opposite of PLAN §0.2's intuition.
+		// Tolerance is a FIXED width (±15/±30/±40 pts) whatever the step, so a bigger
+		// step sits further out in a zero-centred daily-move distribution and is hit
+		// LESS often — it must pay more to hold the same EV. See the provenance
+		// comment in ./ladder.
 		for (const underlying of LADDER_UNDERLYINGS) {
 			const { steps, odds } = LADDER_CONFIG[underlying];
 			const priced = steps.map((step) => odds[step]);
-			expect(priced, underlying).toEqual([...priced].sort((a, b) => b - a));
+			expect(priced, underlying).toEqual([...priced].sort((a, b) => a - b));
 		}
 	});
 });
@@ -132,9 +137,9 @@ describe('generateLadderOptions', () => {
 	it('copies the configured odds onto each option (the only odds source in the app)', () => {
 		const options = generateLadderOptions(LAUNCH_ANCHORS);
 		const nifty = options.find((o) => o.underlying === 'nifty' && o.deltaPoints === 100);
-		expect(nifty?.odds).toBe(4.5);
+		expect(nifty?.odds).toBe(15.2);
 		const sensex = options.find((o) => o.underlying === 'sensex' && o.deltaPoints === 400);
-		expect(sensex?.odds).toBe(3.8);
+		expect(sensex?.odds).toBe(20.3);
 		expect(options.find((o) => o.underlying === 'sensex' && o.deltaPoints === 300)).toBeUndefined();
 	});
 

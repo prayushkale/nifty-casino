@@ -121,7 +121,7 @@ describe('PATCH /api/bets/[id]', () => {
 
 	it('re-prices the odds from the ladder when the target moves', async () => {
 		const { body } = await patch({ targetKind: 'down', deltaPoints: 200 });
-		expect(body.bet).toMatchObject({ targetKind: 'down', deltaPoints: 200, odds: 3.2 });
+		expect(body.bet).toMatchObject({ targetKind: 'down', deltaPoints: 200, odds: 22.4 });
 	});
 
 	it('maps a foreign bet, a bad target and a bad stake to typed codes', async () => {

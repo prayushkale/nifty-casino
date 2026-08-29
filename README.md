@@ -21,6 +21,61 @@ Gates used in CI / every task:
 npm run check && npm run lint && npm run test && npm run build
 ```
 
+## House edge (EV) simulation
+
+**The launch gate.** Every ladder option must have an expected value in **[0.85, 0.95]** — a
+5–15% house edge. Nothing ships until that is true, and `scripts/simulate-ev.ts` exits **1** if it
+is not, so it can be used as a CI gate:
+
+```bash
+npm run sim:ev                                 # 200,000 samples, seed 20260829, ~2s
+npx tsx scripts/simulate-ev.ts --samples 50000 --seed 7 --quiet
+```
+
+The simulator contains no game maths of its own: each simulated day is graded by the real
+`computeTier` and priced by the real `payoutFor` (`src/lib/game/tier`), with steps, odds and
+tolerances read from `LADDER_CONFIG`. `src/lib/config/ladder-ev.test.ts` re-imports that same model
+at 2,000 samples as a fast CI tripwire against an odds edit that silently breaks the edge — the
+script above is the authoritative gate. `--suggest` prints the odds that would centre each option
+at EV 0.90 (that is how the current table was derived).
+
+**Modelling assumptions.** Δ = officialClose − prevClose is a full trading day's move, so
+σ_day = annVol/√252 × level at 13% (NIFTY, SENSEX) / 15% (BANKNIFTY), zero-centred with a −0.02%/day
+drift, plus an 8% Student-t(ν=4) heavy-tail mixture for gap days. Sensitivity (±25% vol, drift 0,
+15% tail, and a "trendy auction" magnet that pulls closes toward the nearest rung) is printed but
+not gated; the adversarial magnet case and a low-vol regime are the two that flip the edge
+player-favourable.
+
+**Final table** (`npm run sim:ev`, seed 20260829, 200,000 samples/scenario, 2026-08-29):
+
+```
+◆ base — 13%/15% ann vol, drift −0.02%/day, 8% t4 tail — THE GATE  ← GATED
+underlying   step   odds   P(hit)  P(flat)  P(miss)       EV    edge  verdict
+nifty         ±50   13.9 0.0577 0.0992 0.8432 0.9006   9.94%  PASS
+nifty        ±100   15.2 0.0526 0.0992 0.8482 0.8987  10.13%  PASS
+nifty        ±150   17.9 0.0448 0.0992 0.8561 0.9006   9.94%  PASS
+nifty        ±200   22.4 0.0358 0.0992 0.8650 0.9012   9.88%  PASS
+banknifty    ±100   18.3 0.0450 0.0766 0.8784 0.8996  10.04%  PASS
+banknifty    ±200   19.1 0.0431 0.0766 0.8803 0.9001   9.99%  PASS
+banknifty    ±300   21.3 0.0386 0.0766 0.8848 0.8991  10.09%  PASS
+banknifty    ±400   24.0 0.0342 0.0766 0.8891 0.8984  10.16%  PASS
+sensex       ±150   17.2 0.0470 0.0907 0.8623 0.8985  10.15%  PASS
+sensex       ±250   17.8 0.0454 0.0907 0.8639 0.8985  10.15%  PASS
+sensex       ±400   20.3 0.0399 0.0907 0.8693 0.9015   9.85%  PASS
+sensex       ±500   22.4 0.0361 0.0907 0.8732 0.8999  10.01%  PASS
+
+BASE-CASE GATE: ALL OPTIONS PASS — EV range 0.8984 … 0.9015 vs band [0.85, 0.95]
+verdict: LAUNCH GATE GREEN
+```
+
+> **These odds replace PLAN §0.2's table.** The plan's 6×/4.5×/3.8×/3.2× priced a 55–81% house
+> edge, because Δ is a whole day's move (σ ≈ 205/529/672 pts) against a ±15/±30/±40 pt hit band —
+> P(hit) is only 3.4–5.8%. The odds above are the simulator's, and they **rise** with the step: with
+> a fixed-width band, a bigger step sits further into the tail of a zero-centred distribution and is
+> harder to hit, which is the opposite of PLAN §0.2's "closer targets are harder" rationale. Tolerance,
+> dead zone and the full-loss miss rule are game rules and were not touched. See the provenance
+> comment in `src/lib/config/ladder.ts`.
+
 ## Architecture in one line
 
 One server-side poller hits NSE/BSE every 4s during the CAS window → stores every tick in

@@ -90,7 +90,7 @@ afterEach(() => {
 	invalidateLadderCache();
 });
 
-/** Two of today's bets, the older one already settled as a HIT that paid 600. */
+/** Two of today's bets, the older one already settled as a HIT on nifty ±50. */
 async function seedTwoBets(): Promise<void> {
 	vi.setSystemTime(new Date(istAt(DAY, 15, 5, 0)));
 	const older = await placeBet(USER, {
@@ -111,7 +111,9 @@ async function seedTwoBets(): Promise<void> {
 	await getStore().settleBets({
 		sessionId: session?.id ?? 0,
 		tradeDate: DAY,
-		outcomes: [{ betId: older.id, userId: USER, stake: 100, odds: 6, tier: 'hit', payout: 600 }],
+		outcomes: [
+			{ betId: older.id, userId: USER, stake: 100, odds: 13.9, tier: 'hit', payout: 1390 }
+		],
 		settledAtMs: istAt(DAY, 15, 45, 0)
 	});
 }
@@ -175,10 +177,10 @@ describe('GET /api/state (signed in)', () => {
 
 		const body = (await (await get()).json()) as StatePayload;
 
-		// 1000 − 100 − 300 staked, +600 paid back to a HIT.
+		// 1000 − 100 − 300 staked, +1390 paid back to a HIT.
 		expect(body.user).toMatchObject({
 			handle: HANDLE,
-			balance: SIGNUP_BONUS - 400 + 600,
+			balance: SIGNUP_BONUS - 400 + 1390,
 			xp: 0,
 			streakDays: 0,
 			lastBetDate: null,
@@ -188,8 +190,8 @@ describe('GET /api/state (signed in)', () => {
 			betsPlaced: 2,
 			betsWon: 1,
 			totalStaked: 400,
-			totalWon: 600,
-			bestPayout: 600
+			totalWon: 1390,
+			bestPayout: 1390
 		});
 
 		// Newest first, and only the fields the strip renders.
@@ -198,7 +200,7 @@ describe('GET /api/state (signed in)', () => {
 			underlying: 'sensex',
 			targetKind: 'down',
 			deltaPoints: 250,
-			odds: 4.5,
+			odds: 17.8,
 			stake: 300,
 			settlementTier: null,
 			payout: null
@@ -207,18 +209,18 @@ describe('GET /api/state (signed in)', () => {
 			underlying: 'nifty',
 			targetKind: 'up',
 			deltaPoints: 50,
-			odds: 6,
+			odds: 13.9,
 			stake: 100,
 			settlementTier: 'hit',
-			payout: 600
+			payout: 1390
 		});
 
-		// The pot moved with the bets: two, 400 staked, 600 paid out, one player.
+		// The pot moved with the bets: two, 400 staked, 1390 paid out, one player.
 		expect(body.pot.today).toMatchObject({
 			tradeDate: DAY,
 			totalBets: 2,
 			totalStaked: 400,
-			totalPaidOut: 600,
+			totalPaidOut: 1390,
 			playersCount: 1
 		});
 	});

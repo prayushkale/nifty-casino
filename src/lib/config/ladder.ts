@@ -3,15 +3,41 @@
  * generator that turns previous-day closes into a day's selectable options.
  *
  * PROVENANCE OF THE ODDS (read before touching them):
- *   These are the *launch set*. They are not guessed twice — Task 15's Monte-Carlo
- *   EV simulation (`scripts/simulate-ev.ts`) is the tuning gate, and it must show
- *   every option's expected value landing in [0.85, 0.95] before launch. A house
- *   edge of 5–15% is the product requirement; an EV >= 1 is a loss-making game.
- *   Intuition for the shape: a tighter target is harder to hit, so it pays more.
+ *   These are NOT the PLAN §0.2 launch table (6 / 4.5 / 3.8 / 3.2). They are the
+ *   Task 15 SIMULATED set, produced by the launch gate and tuned to it:
+ *
+ *     scripts/simulate-ev.ts  --seed 20260829 --samples 200000   (2026-08-29)
+ *     Base case: σ_day = annVol/√252 × level (13% nifty+sensex, 15% banknifty),
+ *     drift −0.02%/day, 8% Student-t(ν=4) heavy tail, graded by computeTier +
+ *     payoutFor. Required gate: every option's EV ∈ [0.85, 0.95].
+ *
+ *   Measured EV at the odds below, all twelve inside the band:
+ *
+ *     nifty      ±50 → 0.9006   ±100 → 0.8987   ±150 → 0.9006   ±200 → 0.9012
+ *     banknifty  ±100 → 0.8996  ±200 → 0.9001   ±300 → 0.8991   ±400 → 0.8984
+ *     sensex     ±150 → 0.8985  ±250 → 0.8985   ±400 → 0.9015   ±500 → 0.8999
+ *
+ *   Why the numbers are what they are, and why they rose ~3–7× from the plan:
+ *   Δ = officialClose − prevClose is a FULL trading day's move (settlement anchors
+ *   on the previous trading day's close), i.e. σ ≈ 205 / 529 / 672 points for
+ *   nifty / banknifty / sensex at the launch anchors. Against that, a ±15/±30/±40
+ *   point HIT band is a sliver: P(hit) is only 3.4–5.8% per option, so an odds
+ *   table in single digits prices a house edge of 55–81%. Re-run the simulator
+ *   (it prints the exact odds each option needs with `--suggest`) whenever the
+ *   anchors, the tolerance or the step set changes — the EV band, not this table,
+ *   is the requirement.
+ *
+ *   READ THE ORDERING BEFORE "FIXING" IT: with a tolerance band of FIXED WIDTH,
+ *   a bigger step puts the band further out in the distribution's tail, so it is
+ *   HARDER to hit and pays MORE. PLAN §0.2's "closer targets are harder → bigger
+ *   odds" intuition is backwards for this rulebook — odds here RISE with the step,
+ *   and `ladder.test.ts` pins that direction. Only a rule change (a tolerance that
+ *   scales with the step) would reverse it.
  *
  *   `tolerancePts` is the per-index band around the target: a HIT needs the right
- *   direction AND |Δ − deltaPoints| <= tolerance. A wider index moves in bigger
- *   steps, so it gets a proportionally wider band.
+ *   direction AND |Δ − deltaPoints| <= tolerance. It is a USER-MANDATED GAME RULE
+ *   (PLAN §0.2), as are the dead zone and the full-loss miss rule — the simulator
+ *   is allowed to tune the odds and nothing else.
  *
  *   The dead zone (flat-refund region, the only mercy rule in PLAN §0.2) is
  *   half the index's *smallest* step — {@link deadZoneHalfStep}. Below it, every
@@ -47,17 +73,17 @@ export type LadderIndexConfig = {
 export const LADDER_CONFIG: Readonly<Record<LadderUnderlying, LadderIndexConfig>> = {
 	nifty: {
 		steps: [50, 100, 150, 200],
-		odds: { 50: 6, 100: 4.5, 150: 3.8, 200: 3.2 },
+		odds: { 50: 13.9, 100: 15.2, 150: 17.9, 200: 22.4 },
 		tolerancePts: 15
 	},
 	banknifty: {
 		steps: [100, 200, 300, 400],
-		odds: { 100: 6, 200: 4.5, 300: 3.8, 400: 3.2 },
+		odds: { 100: 18.3, 200: 19.1, 300: 21.3, 400: 24 },
 		tolerancePts: 30
 	},
 	sensex: {
 		steps: [150, 250, 400, 500],
-		odds: { 150: 6, 250: 4.5, 400: 3.8, 500: 3.2 },
+		odds: { 150: 17.2, 250: 17.8, 400: 20.3, 500: 22.4 },
 		tolerancePts: 40
 	}
 };

@@ -89,14 +89,14 @@ describe('POST /api/bets', () => {
 			underlying: 'nifty',
 			targetKind: 'up',
 			deltaPoints: 50,
-			odds: 6,
+			odds: 13.9,
 			stake: 100
 		});
 	});
 
 	it('never takes odds from the client — the ladder is the only price source', async () => {
 		const { body } = await post({ ...nifty(), odds: 999 });
-		expect((body.bet as Record<string, unknown>).odds).toBe(6);
+		expect((body.bet as Record<string, unknown>).odds).toBe(13.9);
 	});
 
 	it('maps a malformed body to 400 VALIDATION_FAILED', async () => {
