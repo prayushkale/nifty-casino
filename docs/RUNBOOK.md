@@ -497,11 +497,14 @@ the real auction window.
       re-settle is a no-op (`scripts/settle-manual.ts` twice; the second run is a no-op) ⛳
 - [ ] Pot ticker (total bets + NC staked) matches DB aggregates; `/u/<handle>` shows the
       correct per-user totals
-- [ ] Settlement credits consistent: `sum(ledger)` == `balance − 1000` for sampled users:
+- [ ] Settlement credits consistent: the ledger replays to the balance for sampled users.
+      NOTE: the ledger CONTAINS the +1000 signup row, so the correct invariant is
+      `sum(ledger) == balance` (the `balance − 1000` form never trips — a real bug this
+      check once hid). `scripts/dry-run-day.ts` asserts both correct forms (I1/I2):
       ```sql
-      select p.user_id, p.balance - 1000 as expected, coalesce(sum(l.amount),0) as ledger_sum
+      select p.user_id, p.balance as expected, coalesce(sum(l.amount),0) as ledger_sum
         from profiles p left join ledger l on l.user_id = p.user_id
-       group by 1 having p.balance - 1000 <> coalesce(sum(l.amount),0);   -- expect 0 rows
+       group by 1 having p.balance <> coalesce(sum(l.amount),0);   -- expect 0 rows
       ```
 - [ ] Leaderboards + streaks + XP update at settlement ⛳
 - [ ] Load sim: 10k concurrent SSE + snapshot p95 < 500ms on Tier 1 hardware
