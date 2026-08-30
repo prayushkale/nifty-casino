@@ -327,6 +327,10 @@ Interface:
 Exit codes: `0` = settled (or already settled). `1` = refused or incomplete — treat as
 an alert, the day is **not** done.
 
+Rehearse the whole day — bets → settle → balance arc → re-settle no-op — without a feed
+or real players with `scripts/dry-run-day.ts` (README → "Simulation & load"); on a real
+Postgres it needs `--yes` and a free `--date`.
+
 Honesty rules it will not break for you:
 
 - **It never invents a close.** A missing NIFTY/BANKNIFTY/SENSEX official close returns
@@ -501,6 +505,8 @@ the real auction window.
       ```
 - [ ] Leaderboards + streaks + XP update at settlement ⛳
 - [ ] Load sim: 10k concurrent SSE + snapshot p95 < 500ms on Tier 1 hardware
+      (`scripts/load-sim.ts --conns 10000 --duration 120 --ramp 30`; raise the fd limit on
+      the generator AND the server first — README → "Simulation & load")
 - [ ] Production feed unblocked (or the relay is live and `deep=1` says `ok:true`);
       watchdog alerting proven by forcing a failure (stop the app for one probe)
 - [ ] Mobile layout verified at 360px width; all interactions thumb-reachable
