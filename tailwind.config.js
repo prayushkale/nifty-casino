@@ -23,6 +23,9 @@ export default {
 				display: ['ui-sans-serif', 'system-ui', 'sans-serif'],
 				num: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace']
 			},
+			fontSize: {
+				'2xs': ['0.6875rem', { lineHeight: '1.2' }]
+			},
 			boxShadow: {
 				glow: '0 0 24px rgba(245,196,81,0.25)',
 				card: '0 8px 30px rgba(0,0,0,0.55)'

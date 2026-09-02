@@ -22,7 +22,7 @@
 </script>
 
 <span
-	class="inline-flex shrink-0 items-center gap-2 rounded-full border border-felt-700 bg-felt-900/80 px-3 py-1 text-xs text-zinc-400"
+	class="inline-flex shrink-0 items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs text-zinc-600 shadow-sm dark:border-felt-700 dark:bg-felt-900/80 dark:text-zinc-400"
 	title="Everything staked across the table today"
 >
 	<span aria-hidden="true">🪙</span>

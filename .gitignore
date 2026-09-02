@@ -25,3 +25,6 @@ vite.config.ts.timestamp-*
 # Tooling local state
 .commandcode/
 coverage/
+
+# Supabase local
+supabase/.temp/

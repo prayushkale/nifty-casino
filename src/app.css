@@ -4,6 +4,7 @@
 
 @layer base {
 	html {
+		font-size: 16px;
 		scrollbar-color: theme('colors.zinc.700') transparent;
 	}
 	body {
@@ -13,6 +14,15 @@
 				transparent
 			),
 			radial-gradient(900px 500px at -10% 110%, rgba(52, 211, 153, 0.05), transparent);
+	}
+	/* Light surface softens the felt wash so text contrast stays high */
+	html.light body {
+		background-image: radial-gradient(
+				1200px 600px at 80% -10%,
+				rgba(245, 196, 81, 0.08),
+				transparent
+			),
+			radial-gradient(900px 500px at -10% 110%, rgba(52, 211, 153, 0.06), transparent);
 	}
 	num,
 	.num {
@@ -42,16 +52,16 @@
 @layer components {
 	/* Shared form + chrome primitives (T6 auth pages; T11 restyles in place). */
 	.nc-input {
-		@apply w-full rounded-lg border border-felt-700 bg-felt-800 px-3 py-2.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-gold-dim focus:ring-1 focus:ring-gold-dim;
+		@apply w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 text-sm text-zinc-900 outline-none transition placeholder:text-zinc-400 focus:border-gold-dim focus:ring-1 focus:ring-gold-dim dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-100 dark:placeholder:text-zinc-600;
 	}
 	.nc-label {
-		@apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-400;
+		@apply mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400;
 	}
 	.nc-btn {
 		@apply inline-flex w-full items-center justify-center gap-2 rounded-lg bg-gold px-4 py-2.5 text-sm font-semibold text-felt-950 shadow-glow transition hover:bg-gold-glow disabled:cursor-not-allowed disabled:opacity-50;
 	}
 	.nc-btn-ghost {
-		@apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-felt-700 px-3 py-1.5 text-sm font-medium text-zinc-300 transition hover:border-gold-dim hover:text-gold;
+		@apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:border-gold-dim hover:text-gold dark:border-felt-700 dark:bg-transparent dark:text-zinc-300;
 	}
 	.nc-alert {
 		@apply rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-sm text-down;
@@ -68,7 +78,7 @@
 	/* Felt shimmer placeholder. Size it with utilities (`h-4 w-full`); the sweep is
 	   drawn by the ::after so a caller never has to know how the shimmer works. */
 	.nc-skeleton {
-		@apply relative overflow-hidden rounded-md bg-felt-800;
+		@apply relative overflow-hidden rounded-md bg-zinc-200 dark:bg-felt-800;
 	}
 	.nc-skeleton::after {
 		content: '';
@@ -81,7 +91,7 @@
 
 	/* The XP bar: a hairline track with a gold fill, sized by a percentage style. */
 	.nc-xpbar {
-		@apply h-1.5 w-full overflow-hidden rounded-full bg-felt-800;
+		@apply h-1.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-felt-800;
 	}
 	.nc-xpbar-fill {
 		@apply block h-full rounded-full bg-gradient-to-r from-gold-dim to-gold transition-[width] duration-500 ease-out;
@@ -93,16 +103,24 @@
 		@apply pointer-events-auto flex w-full items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-left text-sm shadow-card backdrop-blur;
 	}
 	.nc-toast-ok {
-		@apply border-up/40 bg-felt-900/95 text-up;
+		@apply border-up/40 bg-white/95 text-up dark:bg-felt-900/95;
 	}
 	.nc-toast-err {
-		@apply border-down/40 bg-felt-900/95 text-down;
+		@apply border-down/40 bg-white/95 text-down dark:bg-felt-900/95;
 	}
 	.nc-toast-info {
-		@apply border-gold-dim/50 bg-felt-900/95 text-zinc-200;
+		@apply border-gold-dim/50 bg-white/95 text-zinc-700 dark:bg-felt-900/95 dark:text-zinc-200;
 	}
 	.nc-toast-enter {
 		animation: nc-toast-in 180ms ease-out both;
+	}
+
+	/* Surface helpers for the two-theme board */
+	.nc-card {
+		@apply rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-felt-700 dark:bg-felt-900/80 dark:shadow-card;
+	}
+	.nc-panel {
+		@apply rounded-xl border border-zinc-200 bg-white/90 shadow-sm dark:border-felt-700 dark:bg-felt-900/80;
 	}
 }
 
