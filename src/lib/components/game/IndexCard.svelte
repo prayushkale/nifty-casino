@@ -196,9 +196,9 @@
 </script>
 
 <section
-	class="flex flex-col gap-3 rounded-xl border bg-felt-900/80 p-4 shadow-card transition-colors {expanded
+	class="flex flex-col gap-3 rounded-xl border bg-white p-4 shadow-sm transition-colors dark:bg-felt-900/80 dark:shadow-card {expanded
 		? 'border-gold-dim/40'
-		: 'border-felt-700'}"
+		: 'border-zinc-200 dark:border-felt-700'}"
 	aria-label={label}
 >
 	<header>
@@ -208,9 +208,11 @@
 			aria-expanded={expanded}
 			on:click={() => dispatch('toggle')}
 		>
-			<span class="text-sm font-bold uppercase tracking-widest text-zinc-200">{label}</span>
+			<span class="text-sm font-bold uppercase tracking-widest text-zinc-800 dark:text-zinc-200"
+				>{label}</span
+			>
 			<span class="flex items-baseline gap-2">
-				<span class="num text-xl font-semibold text-zinc-100">
+				<span class="num text-xl font-semibold text-zinc-900 dark:text-zinc-100">
 					{latestValue === null ? '—' : formatNC(latestValue)}
 				</span>
 				<span
@@ -221,13 +223,19 @@
 					{changePts === null ? '—' : fmtSigned(changePts)}
 				</span>
 			</span>
-			<span class="ml-1 text-zinc-600 md:hidden" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+			<span class="ml-1 text-zinc-500 dark:text-zinc-600 md:hidden" aria-hidden="true"
+				>{expanded ? '▾' : '▸'}</span
+			>
 		</button>
-		<p class="mt-1 text-[11px] uppercase tracking-wide text-zinc-600">
+		<p class="mt-1 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-600">
 			prev close
-			<span class="num text-zinc-400">{anchor === null ? '—' : formatNC(Math.round(anchor))}</span>
+			<span class="num text-zinc-700 dark:text-zinc-400"
+				>{anchor === null ? '—' : formatNC(Math.round(anchor))}</span
+			>
 			{#if latestValue !== null && !openPhase}
-				<span class="ml-1 normal-case tracking-normal text-zinc-700">· last indicative</span>
+				<span class="ml-1 normal-case tracking-normal text-zinc-500 dark:text-zinc-700"
+					>· last indicative</span
+				>
 			{/if}
 		</p>
 	</header>
@@ -238,7 +246,9 @@
 			     Shimmer rather than declare the day ladder-less while the read runs. -->
 			<Skeleton lines={4} label="Loading the {label} ladder" />
 		{:else if steps.length === 0}
-			<p class="rounded-lg border border-felt-700 bg-felt-800/60 px-3 py-2 text-xs text-zinc-400">
+			<p
+				class="rounded-lg border bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-felt-700 dark:bg-felt-800/60 dark:text-zinc-400"
+			>
 				No ladder for {label} today — the previous close has not landed yet.
 			</p>
 		{:else if !authed}
@@ -249,7 +259,7 @@
 						{#each [row.up, row.down] as option}
 							{#if option}
 								<div
-									class="flex min-h-[44px] flex-col items-start rounded-lg border border-felt-700 bg-felt-800 px-2.5 py-1.5 text-left"
+									class="flex min-h-[44px] flex-col items-start rounded-lg border bg-zinc-50 px-2.5 py-1.5 text-left dark:border-felt-700 dark:bg-felt-800"
 								>
 									<span
 										class="num text-[11px] font-semibold {option.targetKind === 'up'
@@ -258,7 +268,7 @@
 									>
 										{option.targetKind === 'up' ? '▲' : '▼'} ±{formatNC(option.deltaPoints)}
 									</span>
-									<span class="num text-sm font-semibold text-zinc-100">
+									<span class="num text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{formatNC(Math.round(option.target))}
 									</span>
 									<span class="num text-[10px] text-gold-dim">{option.odds}×</span>
@@ -268,7 +278,9 @@
 					</div>
 				{/each}
 			</div>
-			<p class="rounded-lg border border-felt-700 bg-felt-800/60 px-3 py-2 text-xs text-zinc-400">
+			<p
+				class="rounded-lg border bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-felt-700 dark:bg-felt-800/60 dark:text-zinc-400"
+			>
 				<a href="/auth/login" class="text-gold underline decoration-gold-dim">Log in</a>
 				or
 				<a href="/auth/signup" class="text-gold underline decoration-gold-dim">sign up</a>
@@ -276,8 +288,12 @@
 			</p>
 		{:else if canManage && !editing && myBet}
 			<!-- ── existing bet: summary + manage, in place of the chips ─────────────── -->
-			<div class="rounded-lg border border-gold-dim/40 bg-gold/5 p-3">
-				<p class="text-[11px] uppercase tracking-widest text-gold">Your call today</p>
+			<div
+				class="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-gold-dim/40 dark:bg-gold/5"
+			>
+				<p class="text-xs uppercase tracking-widest text-amber-700 dark:text-gold">
+					Your call today
+				</p>
 				<p class="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
 					<span
 						class="num text-base font-semibold {myBet.targetKind === 'up'
@@ -287,14 +303,16 @@
 						{myBet.targetKind === 'up' ? '▲' : '▼'}
 						{myBet.targetKind === 'up' ? '+' : '−'}{formatNC(myBet.deltaPoints)}
 					</span>
-					<span class="num text-sm text-zinc-300">{formatNC(myBet.stake)} NC</span>
+					<span class="num text-sm text-zinc-700 dark:text-zinc-300"
+						>{formatNC(myBet.stake)} NC</span
+					>
 					<span class="num text-xs text-zinc-500">@ {myBet.odds}×</span>
 					<span class="num text-xs text-up"
 						>pays {formatNC(payoutFor('hit', myBet.stake, myBet.odds))}</span
 					>
 				</p>
 				{#if projection}
-					<p class="mt-1.5 text-[11px] text-zinc-500">
+					<p class="mt-1.5 text-xs text-zinc-600 dark:text-zinc-500">
 						if it closed now:
 						<span class="num {projection.tier === 'miss' ? 'text-down' : 'text-up'}">
 							{projection.tier === 'hit'
@@ -343,7 +361,7 @@
 									type="button"
 									class="flex min-h-[44px] flex-col items-start rounded-lg border px-2.5 py-1.5 text-left transition {isSelected
 										? 'border-gold bg-gold/15 shadow-glow ring-1 ring-gold'
-										: 'border-felt-700 bg-felt-800 hover:border-gold-dim'} {chipsEnabled
+										: 'border-zinc-200 bg-zinc-50 hover:border-gold-dim dark:border-felt-700 dark:bg-felt-800'} {chipsEnabled
 										? ''
 										: 'cursor-not-allowed opacity-40'}"
 									aria-pressed={isSelected}
@@ -357,7 +375,7 @@
 									>
 										{option.targetKind === 'up' ? '▲' : '▼'} ±{formatNC(option.deltaPoints)}
 									</span>
-									<span class="num text-sm font-semibold text-zinc-100">
+									<span class="num text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{formatNC(Math.round(option.target))}
 									</span>
 									<span class="num text-[10px] text-gold-dim">{option.odds}×</span>
@@ -374,7 +392,7 @@
 					{#each [10, 50, 100] as amount (amount)}
 						<button
 							type="button"
-							class="min-h-[44px] rounded-full border border-felt-700 bg-felt-800 px-3.5 text-xs font-semibold text-zinc-300 transition hover:border-gold-dim hover:text-gold"
+							class="min-h-[44px] rounded-full border bg-zinc-50 px-3.5 text-xs font-semibold text-zinc-700 transition hover:border-gold-dim hover:text-gold dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-300"
 							on:click={() => quickStake(amount)}
 						>
 							{amount}
@@ -393,10 +411,10 @@
 					/>
 				</div>
 				{#if stakeInput !== '' && !stakeOk}
-					<p class="mt-1.5 text-[11px] text-down" role="status">{stakeError}</p>
+					<p class="mt-1.5 text-xs text-down" role="status">{stakeError}</p>
 				{/if}
 				{#if selected && stakeOk && potential !== null}
-					<p class="mt-1.5 text-[11px] text-zinc-500">
+					<p class="mt-1.5 text-xs text-zinc-600 dark:text-zinc-500">
 						{formatNC(Math.round(selected.target))} pays
 						<span class="num text-up">+{formatNC(potential)} NC</span>
 						{#if projection}

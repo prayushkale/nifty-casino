@@ -33,7 +33,7 @@
 
 {#if balance === null}
 	<span
-		class="inline-flex items-center gap-1.5 rounded-full border border-felt-700 bg-felt-800 px-3 py-1 text-xs font-semibold text-zinc-500"
+		class="inline-flex items-center gap-1.5 rounded-full border bg-zinc-50 px-3 py-1 text-xs font-semibold text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-500"
 		title="Log in to see your chips"
 	>
 		<span aria-hidden="true">🪙</span>

@@ -160,6 +160,8 @@ export function formatSignedPoints(n: number | null): string {
  * The casino's chart palette — the dark felt of PLAN §4, not M.OI's light theme.
  * Kept here (not in Tailwind) because canvas cannot read Tailwind classes: the
  * chart needs the resolved hex of the same tokens the surrounding card uses.
+ * Light-mode overrides live alongside (CHART_COLORS_LIGHT) and CasChart picks at
+ * runtime — canvas can't read CSS vars either.
  */
 export const CHART_COLORS = {
 	/** felt-950 — the chart's own background, one shade under the felt-900 card. */
@@ -177,4 +179,15 @@ export const CHART_COLORS = {
 	down: '#f87171',
 	/** No anchor yet (or a dead-flat day): neutral zinc, never a fake direction. */
 	flat: '#a1a1aa'
+} as const;
+
+export const CHART_COLORS_LIGHT = {
+	background: '#ffffff',
+	grid: '#e5e7eb',
+	text: '#52525b',
+	crosshair: '#a1a1aa',
+	target: '#d97706',
+	up: '#059669',
+	down: '#dc2626',
+	flat: '#71717a'
 } as const;

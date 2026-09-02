@@ -51,7 +51,7 @@
 	</div>
 {:else if phase === 'locked'}
 	<div
-		class="flex items-center gap-2 rounded-xl border border-felt-700 bg-felt-900/80 px-4 py-3 text-sm text-zinc-300"
+		class="flex items-center gap-2 rounded-xl border bg-white px-4 py-3 text-sm text-zinc-700 shadow-sm dark:border-felt-700 dark:bg-felt-900/80 dark:text-zinc-300"
 		role="status"
 	>
 		<span aria-hidden="true">🔒</span>
@@ -75,7 +75,7 @@
 	</div>
 {:else if phase === 'closed-weekend'}
 	<div
-		class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-felt-700 bg-felt-900/80 px-4 py-3 text-sm text-zinc-300"
+		class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border bg-white px-4 py-3 text-sm text-zinc-700 shadow-sm dark:border-felt-700 dark:bg-felt-900/80 dark:text-zinc-300"
 		role="status"
 	>
 		<span aria-hidden="true">🌙</span>
@@ -85,7 +85,7 @@
 		</span>
 		{#if next}
 			<span
-				class="num ml-auto inline-flex items-center gap-1.5 rounded-full border border-felt-700 bg-felt-800 px-2.5 py-1 text-xs font-semibold text-zinc-300"
+				class="num ml-auto inline-flex items-center gap-1.5 rounded-full border bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-300"
 				role="timer"
 				aria-label="Time until the market opens"
 			>

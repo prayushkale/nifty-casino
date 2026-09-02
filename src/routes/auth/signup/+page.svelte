@@ -88,7 +88,7 @@
 				required
 			/>
 			{#if fields.password}<p class="mt-1 text-xs text-down">{fields.password}</p>{/if}
-			<p class="mt-1 text-xs text-zinc-600">At least 8 characters.</p>
+			<p class="mt-1 text-xs text-zinc-600 dark:text-zinc-400">At least 8 characters.</p>
 		</div>
 
 		<div>
@@ -105,16 +105,22 @@
 			{#if fields.handle}
 				<p class="mt-1 text-xs text-down">{fields.handle}</p>
 			{:else}
-				<p class="mt-1 text-xs text-zinc-600">We'll assign one if you skip this.</p>
+				<p class="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+					We'll assign one if you skip this.
+				</p>
 			{/if}
 		</div>
 
 		<div class="space-y-1">
-			<label class="flex items-start gap-2.5 text-sm text-zinc-300">
+			<label class="flex items-start gap-2.5 text-sm text-zinc-700 dark:text-zinc-300">
 				<input type="checkbox" class="mt-0.5 h-4 w-4 accent-gold" bind:checked={tos} />
 				<span>
 					I'm 18+, this is play-money entertainment, no real money —
-					<a href="/terms" class="text-gold underline decoration-gold-dim">see the terms</a>.
+					<a
+						href="/terms"
+						class="text-amber-700 underline decoration-amber-300 dark:text-gold dark:decoration-gold-dim"
+						>see the terms</a
+					>.
 				</span>
 			</label>
 			{#if fields.tos}<p class="text-xs text-down">{fields.tos}</p>{/if}
@@ -124,9 +130,13 @@
 			{busy ? 'Dealing you in…' : 'Create account'}
 		</button>
 
-		<p class="text-center text-xs text-zinc-500">
+		<p class="text-center text-xs text-zinc-600 dark:text-zinc-500">
 			Already have chips?
-			<a href="/auth/login" class="text-gold underline decoration-gold-dim">Log in</a>
+			<a
+				href="/auth/login"
+				class="text-amber-700 underline decoration-amber-300 dark:text-gold dark:decoration-gold-dim"
+				>Log in</a
+			>
 		</p>
 	</form>
 </AuthCard>

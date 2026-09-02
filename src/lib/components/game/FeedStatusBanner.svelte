@@ -32,7 +32,7 @@
 
 {#if staleNow || (base && view.status !== 'live')}
 	<div
-		class="flex items-center gap-2 rounded-lg border border-felt-700 bg-felt-900/80 px-3 py-1 text-[11px]"
+		class="flex items-center gap-2 rounded-lg border bg-white px-3 py-1 text-xs shadow-sm dark:border-felt-700 dark:bg-felt-900/80"
 		role="status"
 		aria-live="polite"
 	>
