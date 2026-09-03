@@ -445,6 +445,7 @@
 								{balance}
 								loading={$stateLoading}
 								myBet={myBets.find((bet) => bet.underlying === fullscreen) ?? null}
+								crowd={state.crowd[fullscreen] ?? []}
 								expanded={true}
 								on:toggle={() => {}}
 								on:action={() => {
@@ -472,6 +473,7 @@
 							{balance}
 							loading={$stateLoading}
 							myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
+							crowd={state.crowd[underlying] ?? []}
 							expanded={expandedFor(underlying)}
 							on:toggle={() => toggleCard(underlying)}
 							on:action={() => focusCard(underlying)}

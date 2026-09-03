@@ -28,6 +28,7 @@ import type { LadderOption, LadderUnderlying } from '$lib/config/ladder';
 import { getLadderForDateWithLiveFallback } from '$lib/server/ladder';
 import type { LiveCloseDeps } from '$lib/server/live-closes';
 import { getStore, type GameStore } from '$lib/server/db';
+import { buildCrowdDistribution, type CrowdDistribution } from '$lib/game/crowd';
 import type {
 	Bet,
 	DailyPot,
@@ -131,6 +132,12 @@ export type StatePayload = {
 	myBets: StateBet[];
 	pot: PotSnapshot;
 	ladder: StateLadder;
+	/**
+	 * The crowd consensus: per index, one row per picked strike with its share
+	 * of that index's bets (`$lib/game/crowd`). Aggregate counts only — no
+	 * handles, no ids. Empty per index when nobody has bet it yet.
+	 */
+	crowd: CrowdDistribution;
 };
 
 // ---------------------------------------------------------------------------
@@ -174,6 +181,53 @@ export async function buildPotSnapshot(store: GameStore, tradeDate: string): Pro
 		today: today ? toPotView(today) : zeroPotView(tradeDate),
 		yesterday: yesterday ? toPotView(yesterday) : null
 	};
+}
+
+// ---------------------------------------------------------------------------
+// The crowd consensus (strike distribution)
+// ---------------------------------------------------------------------------
+
+/** The last (tradeDate, totalBets) the crowd payload was computed at. */
+let crowdCache: {
+	tradeDate: string;
+	totalBets: number;
+	distribution: CrowdDistribution;
+} | null = null;
+
+/** Test seam — clears the module cache between cases. */
+export function resetCrowdCache(): void {
+	crowdCache = null;
+}
+
+/** A cache miss means the day's bets moved (or a new day started). */
+function crowdCacheHit(tradeDate: string, totalBets: number): CrowdDistribution | null {
+	return crowdCache !== null &&
+		crowdCache.tradeDate === tradeDate &&
+		crowdCache.totalBets === totalBets
+		? crowdCache.distribution
+		: null;
+}
+
+/**
+ * How the day's bets spread across the strikes, per index. The walk is bounded
+ * by the `daily_pots.totalBets` delta counter as the cache key (PLAN §3 keeps
+ * counters off SUM paths — here the counter gates the one aggregate the product
+ * needs): an unchanged pot is a cache hit and re-reads nothing.
+ */
+export async function buildCrowdPayload(
+	store: GameStore,
+	tradeDate: string,
+	totalBets: number
+): Promise<CrowdDistribution> {
+	if (totalBets === 0) return {};
+	const hit = crowdCacheHit(tradeDate, totalBets);
+	if (hit) return hit;
+	const session = await store.sessions.getSessionByDate(tradeDate);
+	if (!session) return {};
+	const bets = await store.bets.listBetsForSession(session.id);
+	const distribution = buildCrowdDistribution(bets);
+	crowdCache = { tradeDate, totalBets, distribution };
+	return distribution;
 }
 
 // ---------------------------------------------------------------------------
@@ -252,13 +306,17 @@ export async function buildStatePayload(options: StateOptions = {}): Promise<Sta
 		buildPotSnapshot(store, tradeDate),
 		getLadderForDateWithLiveFallback(store, tradeDate, options.live ?? {})
 	]);
+	// Depends on the pot just read (its totalBets is the cache key), so it runs
+	// after — usually a cache hit, at most one session read + one bets walk.
+	const crowd = await buildCrowdPayload(store, tradeDate, pot.today.totalBets);
 
 	const head = {
 		serverNow,
 		tradeDate,
 		session: sessionFlags(now, session),
 		pot,
-		ladder: { tradeDate: ladder.tradeDate, anchors: ladder.anchors, options: ladder.options }
+		ladder: { tradeDate: ladder.tradeDate, anchors: ladder.anchors, options: ladder.options },
+		crowd
 	};
 
 	const userId = options.userId ?? null;

@@ -15,6 +15,7 @@
 	} from '$lib/stores/game';
 	import ConfirmModal from './ConfirmModal.svelte';
 	import Skeleton from './Skeleton.svelte';
+	import { crowdLeader, type CrowdPick } from '$lib/game/crowd';
 
 	/**
 	 * One index, the whole bet flow for it (PLAN §4 index card):
@@ -42,6 +43,12 @@
 	export let balance: number | null = null;
 	/** The player's existing bet on this index, if any. */
 	export let myBet: StateBet | null = null;
+	/**
+	 * The crowd consensus for THIS index: one row per picked strike with its
+	 * share of the day's bets (`/api/state` → `crowd[underlying]`). Empty when
+	 * nobody has bet the index yet — the board then shows no bars.
+	 */
+	export let crowd: CrowdPick[] = [];
 	/** Mobile accordion: the card the player is working on is expanded. */
 	export let expanded = true;
 	/**
@@ -68,6 +75,26 @@
 	let query = '';
 
 	$: openPhase = phase === 'open';
+
+	/** Strike → its crowd share, so each row is one map lookup away from its bar. */
+	$: crowdByStrike = new Map(crowd.map((pick) => [`${pick.targetKind}:${pick.deltaPoints}`, pick]));
+	/** The strike most players picked — the one row that gets the 🔥 badge. */
+	$: leader = crowdLeader(crowd);
+	/** Total bets behind the distribution — “34% of 12 bets”. */
+	$: crowdCount = crowd.reduce((sum, pick) => sum + pick.count, 0);
+
+	function crowdFor(strike: LadderOption & { targetKind: 'up' | 'down' }): CrowdPick | null {
+		if (crowdCount === 0) return null;
+		return crowdByStrike.get(`${strike.targetKind}:${strike.deltaPoints}`) ?? null;
+	}
+
+	function isLeader(strike: LadderOption & { targetKind: 'up' | 'down' }): boolean {
+		return (
+			leader !== null &&
+			leader.targetKind === strike.targetKind &&
+			leader.deltaPoints === strike.deltaPoints
+		);
+	}
 	$: canBet = authed && openPhase && myBet === null;
 	$: canManage = authed && openPhase && myBet !== null;
 	$: chipsEnabled = authed && openPhase && (myBet === null || editing);
@@ -299,6 +326,7 @@
 				aria-label="{label} strikes (view only)"
 			>
 				{#each visibleStrikes as strike (strike.target)}
+					{@const crowdShare = crowdFor(strike)}
 					<div
 						class="flex min-h-[44px] flex-col items-start rounded-lg border bg-zinc-50 px-2.5 py-1.5 text-left {strike.atTheMoney
 							? 'border-gold-dim'
@@ -313,11 +341,25 @@
 							{formatNC(Math.round(strike.target))}
 							{strike.targetKind === 'up' ? 'CE' : 'PE'}
 							{strike.atTheMoney ? '·ATM' : ''}
+							{isLeader(strike) ? '🔥' : ''}
 						</span>
 						<span class="num text-[10px] text-zinc-500 dark:text-zinc-500">
 							{fmtSigned(strike.targetKind === 'up' ? strike.deltaPoints : -strike.deltaPoints)} · up
-							to {strike.odds}×</span
+							to {strike.odds}×{crowdShare ? ` · ${crowdShare.pct}%` : ''}</span
 						>
+						{#if crowdShare}
+							<span
+								class="mt-1 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-felt-700"
+								title="{crowdShare.pct}% of {crowdCount} {crowdCount === 1
+									? 'bet'
+									: 'bets'} picked this strike"
+							>
+								<span
+									class="block h-full rounded-full bg-gold"
+									style="width: {Math.min(crowdShare.pct, 100)}%"
+								></span>
+							</span>
+						{/if}
 					</div>
 				{/each}
 			</div>
@@ -436,6 +478,7 @@
 				<div class="grid grid-cols-2 gap-1.5">
 					<div class="flex flex-col gap-1.5" role="group" aria-label="{label} CE strikes">
 						{#each ceStrikes as strike (strike.deltaPoints)}
+							{@const crowdShare = crowdFor(strike)}
 							{@const isSelected =
 								selected?.targetKind === 'up' && selected?.deltaPoints === strike.deltaPoints}
 							<button
@@ -455,6 +498,7 @@
 								<span class="num text-sm font-semibold text-up">
 									{formatNC(Math.round(strike.target))} CE
 									{strike.atTheMoney ? '· ATM' : ''}
+									{isLeader(strike) ? '🔥' : ''}
 								</span>
 								<span class="num text-[10px] text-zinc-500 dark:text-zinc-500">
 									{fmtSigned(strike.deltaPoints)} ·
@@ -462,13 +506,27 @@
 										class="text-gold-dim"
 										title="Exact hit pays {strike.odds}× — nearby pays proportionally less"
 										>up to {strike.odds}×</span
-									></span
+									>{crowdShare ? ` · ${crowdShare.pct}% picked` : ''}</span
 								>
+								{#if crowdShare}
+									<span
+										class="mt-1 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-felt-700"
+										title="{crowdShare.pct}% of {crowdCount} {crowdCount === 1
+											? 'bet'
+											: 'bets'} picked this strike"
+									>
+										<span
+											class="block h-full rounded-full bg-gold"
+											style="width: {Math.min(crowdShare.pct, 100)}%"
+										></span>
+									</span>
+								{/if}
 							</button>
 						{/each}
 					</div>
 					<div class="flex flex-col gap-1.5" role="group" aria-label="{label} PE strikes">
 						{#each peStrikes as strike (strike.deltaPoints)}
+							{@const crowdShare = crowdFor(strike)}
 							{@const isSelected =
 								selected?.targetKind === 'down' && selected?.deltaPoints === strike.deltaPoints}
 							<button
@@ -488,6 +546,7 @@
 								<span class="num text-sm font-semibold text-down">
 									{formatNC(Math.round(strike.target))} PE
 									{strike.atTheMoney ? '· ATM' : ''}
+									{isLeader(strike) ? '🔥' : ''}
 								</span>
 								<span class="num text-[10px] text-zinc-500 dark:text-zinc-500">
 									{fmtSigned(-strike.deltaPoints)} ·
@@ -495,8 +554,21 @@
 										class="text-gold-dim"
 										title="Exact hit pays {strike.odds}× — nearby pays proportionally less"
 										>up to {strike.odds}×</span
-									></span
+									>{crowdShare ? ` · ${crowdShare.pct}% picked` : ''}</span
 								>
+								{#if crowdShare}
+									<span
+										class="mt-1 h-1 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-felt-700"
+										title="{crowdShare.pct}% of {crowdCount} {crowdCount === 1
+											? 'bet'
+											: 'bets'} picked this strike"
+									>
+										<span
+											class="block h-full rounded-full bg-gold"
+											style="width: {Math.min(crowdShare.pct, 100)}%"
+										></span>
+									</span>
+								{/if}
 							</button>
 						{/each}
 					</div>
