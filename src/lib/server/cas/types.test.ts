@@ -10,7 +10,9 @@ import {
 	extractNseLtp,
 	extractNseMarketStatusIndicative,
 	extractNseMarketStatusNiftyTick,
-	extractNseMarketStatusOk
+	extractNseMarketStatusOk,
+	parseBseDttm,
+	parseNseTimeVal
 } from './types';
 import {
 	BANKNIFTY_QUOTE,
@@ -41,8 +43,10 @@ describe('extractNseCasTick (E1 → normalized tick)', () => {
 			changePct: 0.16,
 			prevClose: 24586.15,
 			ts: TS,
+			upstreamTs: parseNseTimeVal(NIFTY_QUOTE.timeVal),
 			source: 'nse'
 		});
+		expect(parseNseTimeVal(NIFTY_QUOTE.timeVal)).not.toBeNull();
 	});
 
 	it('extracts NIFTY BANK from the same payload', () => {
@@ -174,6 +178,7 @@ describe('extractNseMarketStatusIndicative (E3 cross-check)', () => {
 			changePct: 0.04,
 			prevClose: null,
 			ts: TS,
+			upstreamTs: null,
 			source: 'nse'
 		});
 		expect(extractNseMarketStatusNiftyTick({ marketState: [] }, TS)).toBeNull();
@@ -210,8 +215,10 @@ describe('extractBseCasTick (GetSensexDatanew → normalized tick)', () => {
 			changePct: 0.34,
 			prevClose: 78581,
 			ts: TS,
+			upstreamTs: parseBseDttm(buildBseSensexRow().dttm),
 			source: 'bse'
 		});
+		expect(parseBseDttm(buildBseSensexRow().dttm)).not.toBeNull();
 	});
 
 	it('null while the indicative close is "-" (outside the CAS window)', () => {
@@ -303,5 +310,37 @@ describe('extractLtpQuotes — both feeds, one instant', () => {
 			banknifty: null,
 			sensex: null
 		});
+	});
+});
+
+describe('upstream timestamp parsers (freshness instrumentation)', () => {
+	it('parses NSE timeVal ("dd-MMM-yyyy HH:mm:ss", IST) to epoch ms', () => {
+		const epoch = parseNseTimeVal('06-Aug-2026 15:30:00');
+		// 15:30:00 IST == 10:00:00 UTC
+		expect(epoch).toBe(Date.UTC(2026, 7, 6, 10, 0, 0));
+	});
+
+	it('parses BSE dttm ("dd MMM yy | HH:mm", IST, no seconds)', () => {
+		const epoch = parseBseDttm('06 Aug 26 | 13:38');
+		expect(epoch).toBe(Date.UTC(2026, 7, 6, 8, 8, 0));
+	});
+
+	it('returns null for absent/malformed values — never guesses', () => {
+		expect(parseNseTimeVal(undefined)).toBeNull();
+		expect(parseNseTimeVal('06-Aug-2026')).toBeNull();
+		expect(parseNseTimeVal('99-Xyz-2026 15:30:00')).toBeNull();
+		expect(parseBseDttm(null)).toBeNull();
+		expect(parseBseDttm('06 Aug 2026 | 13:38')).toBeNull();
+		expect(parseBseDttm('not a time')).toBeNull();
+	});
+
+	it('carry through to the extractors', () => {
+		const nse = extractNseCasTick(buildNseIndexDataResponse(), 'nifty', TS);
+		expect(nse?.upstreamTs).toBe(parseNseTimeVal(NIFTY_QUOTE.timeVal));
+		const bse = extractBseCasTick([buildBseSensexRow()], TS);
+		expect(bse?.upstreamTs).toBe(parseBseDttm(buildBseSensexRow().dttm));
+		expect(
+			extractBseCasTick([buildBseSensexRow({ dttm: undefined as never })], TS)?.upstreamTs
+		).toBeNull();
 	});
 });

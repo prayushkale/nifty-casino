@@ -52,8 +52,11 @@ export const AUCTION_END_HMS = { h: 15, m: 42, s: 0 } as const;
 /** Virtual chips credited on signup. Play-money only. */
 export const SIGNUP_BONUS = 1000;
 
-/** Upstream NSE/BSE poll cadence on our server (ms). Never poll faster client-side. */
-export const POLL_MS = 4000;
+/** Upstream NSE/BSE poll cadence on our server (ms). 2s halves the pipeline's
+ *  contribution to end-to-end lag versus the old 4s; if Akamai ever shows
+ *  AUTH/BLOCKED pressure in-window, revert to 4000 (or step 3000) here — the
+ *  poller needs no other change. Never poll faster client-side. */
+export const POLL_MS = 2000;
 
 /** Idle SSE connections from hidden tabs are dropped after this long. */
 export const SSE_IDLE_TIMEOUT_MS = 10 * 60_000;
@@ -66,10 +69,10 @@ export const RING_BUFFER_CAP = 720;
 
 /**
  * A feed is "stale" when the newest tick is older than this while the auction is
- * live — drives the client staleness banner (Task 12). Upstream polls at 4s, so
- * three missed polls is the threshold before a user should be told.
+ * live — drives the client staleness banner (Task 12). Upstream polls at 2s, so
+ * four missed polls is the threshold before a user should be told.
  */
-export const CAS_STALE_MS = 12_000;
+export const CAS_STALE_MS = 8_000;
 
 /**
  * Client cadence for the REST fallback (`GET /api/cas/all`) used only when the
@@ -78,7 +81,7 @@ export const CAS_STALE_MS = 12_000;
  * notice — and it is a FALLBACK: an SSE client costs the origin one snapshot per
  * reconnect, a polling client one snapshot every one of these.
  */
-export const CAS_FALLBACK_POLL_MS = 8000;
+export const CAS_FALLBACK_POLL_MS = 4000;
 
 /**
  * Two `EventSource` errors inside this window means the stream is not coming

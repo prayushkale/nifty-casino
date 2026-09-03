@@ -52,6 +52,11 @@ export type CasLatest = {
 	prevClose: number | null;
 	/** epoch ms of the poll this display payload came from. */
 	ts: number;
+	/**
+	 * Exchange-side timestamp the value itself carries (epoch ms), or null when
+	 * the feed did not provide one — the true freshness signal for the UI.
+	 */
+	upstreamTs: number | null;
 	source: CasLatestSource;
 };
 
@@ -139,6 +144,7 @@ function toLatest(payload: CasTickPayload): CasLatest {
 		changePct: payload.changePct,
 		prevClose: payload.prevClose,
 		ts: payload.ts,
+		upstreamTs: payload.upstreamTs,
 		source: payload.source
 	};
 }

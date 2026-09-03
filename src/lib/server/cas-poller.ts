@@ -243,6 +243,7 @@ export async function pollOnce(deps: PollerDeps = {}, now: Date = new Date()): P
 	if (payloads.length === 0) return { polled: 0, accepted: 0, persisted: 0, anchored: [] };
 
 	const { accepted } = hot.ingest(payloads, now);
+	logFreshness(log, payloads);
 
 	let persisted = 0;
 	try {
@@ -256,6 +257,41 @@ export async function pollOnce(deps: PollerDeps = {}, now: Date = new Date()): P
 
 	const anchored = await anchorPrevCloses(deps, store, accepted, now);
 	return { polled: payloads.length, accepted: accepted.length, persisted, anchored };
+}
+
+/**
+ * One-line freshness report per poll: the exchange-side age of the OLDEST value
+ * we just received (`pollTs - upstreamTs`). This is the measurement that splits
+ * "our pipeline is slow" from "the exchange/CDN published it late": an age of
+ * ~0–1s means the feed is live and any end-to-end lag is ours; an age of tens
+ * of seconds means the upstream payload was already stale on arrival and no
+ * faster polling can fix it. Logged every poll (one compact line, in-window
+ * only by construction). Warnings fire separately when age is suspicious.
+ */
+const FRESHNESS_WARN_AGE_MS = 10_000;
+export function logFreshness(
+	log: Pick<Console, 'info' | 'warn'>,
+	payloads: readonly CasTickPayload[],
+	now: number = Date.now()
+): void {
+	let worstAgeMs: number | null = null;
+	let worstLabel = '';
+	for (const payload of payloads) {
+		if (payload.upstreamTs === null) continue;
+		const age = now - payload.upstreamTs;
+		if (worstAgeMs === null || age > worstAgeMs) {
+			worstAgeMs = age;
+			worstLabel = payload.underlying;
+		}
+	}
+	if (worstAgeMs === null) return;
+	const seconds = (worstAgeMs / 1000).toFixed(1);
+	const line = `[cas-poller] freshness: ${worstLabel} upstream age ${seconds}s`;
+	if (worstAgeMs > FRESHNESS_WARN_AGE_MS) {
+		log.warn(`${line} — exchange payload arrived stale`);
+	} else {
+		log.info(line);
+	}
 }
 
 /**

@@ -43,6 +43,7 @@ function payload(overrides: Partial<CasTickPayload> & { ts: number }): CasTickPa
 		changePts: 12,
 		changePct: 0.05,
 		prevClose: 24988,
+		upstreamTs: null,
 		source: 'nse',
 		...overrides
 	};
@@ -174,6 +175,7 @@ describe('ingest', () => {
 			changePct: 0.24,
 			prevClose: 56104.5,
 			ts: at(15, 14),
+			upstreamTs: null,
 			source: 'nse'
 		});
 		expect(store.prevCloseFor(DAY, 'banknifty')).toBe(56104.5);
@@ -337,11 +339,11 @@ describe('window gating + staleness', () => {
 		expect(isAuctionWindowActive(new Date(ts))).toBe(expected);
 	});
 
-	it('is stale only inside the window and only after three missed polls', () => {
+	it('is stale only inside the window and only after four missed polls', () => {
 		const newest = at(15, 20, 0);
 		expect(isCasStale(newest, new Date(newest + 4_000))).toBe(false);
-		expect(isCasStale(newest, new Date(newest + 12_000))).toBe(false);
-		expect(isCasStale(newest, new Date(newest + 12_001))).toBe(true);
+		expect(isCasStale(newest, new Date(newest + 8_000))).toBe(false);
+		expect(isCasStale(newest, new Date(newest + 8_001))).toBe(true);
 		// outside the window an old tick is just... yesterday's data
 		expect(isCasStale(at(15, 14), new Date(at(18, 0)))).toBe(false);
 		expect(isCasStale(null, new Date(at(15, 20)))).toBe(false);

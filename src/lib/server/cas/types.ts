@@ -24,6 +24,13 @@ export type CasSource = 'nse' | 'bse';
  * `value` is the indicative close; `changePts`/`changePct` are measured against
  * the previous day's official close (matches NSE `icChange` semantics, which is
  * the game's anchor). `ts` is epoch ms — IST wall time is derived from it.
+ *
+ * `upstreamTs` is the exchange's OWN timestamp for the value (`timeVal` on NSE
+ * E1 rows, `dttm` on BSE rows), when one is carried and parseable. It is the
+ * freshness measurement for the whole feed: `ts - upstreamTs` = how old the
+ * exchange says the number is when we received it — the number that separates
+ * "our pipeline is slow" from "the exchange/CDN published it late". null when
+ * the feed carried no parseable time (freshness is then unmeasurable).
  */
 export type CasTickPayload = {
 	underlying: Underlying;
@@ -33,8 +40,82 @@ export type CasTickPayload = {
 	/** Previous day's official close, or null when the feed did not carry one. */
 	prevClose: number | null;
 	ts: number;
+	/** Exchange-side timestamp of the value (epoch ms), or null when not carried. */
+	upstreamTs: number | null;
 	source: CasSource;
 };
+
+/** IST = UTC+5:30, no DST — inlined so this module stays dependency-free. */
+const IST_OFFSET_MS = 330 * 60_000;
+
+const MONTHS: Record<string, number> = {
+	Jan: 0,
+	Feb: 1,
+	Mar: 2,
+	Apr: 3,
+	May: 4,
+	Jun: 5,
+	Jul: 6,
+	Aug: 7,
+	Sep: 8,
+	Oct: 9,
+	Nov: 10,
+	Dec: 11
+};
+
+/**
+ * Parse an IST wall-clock date-time into epoch ms, or null when unparseable.
+ * `day`/`mon`/`year` may be zero-padded; the result is exact to the second.
+ */
+function istPartsToEpochMs(
+	year: number,
+	month: number,
+	day: number,
+	hh: number,
+	mm: number,
+	ss: number
+): number | null {
+	if (
+		!Number.isFinite(year) ||
+		!Number.isFinite(month) ||
+		!Number.isFinite(day) ||
+		!Number.isFinite(hh) ||
+		!Number.isFinite(mm) ||
+		!Number.isFinite(ss)
+	) {
+		return null;
+	}
+	// Build UTC ms for the IST wall clock, then subtract the IST offset.
+	return Date.UTC(year, month, day, hh, mm, ss) - IST_OFFSET_MS;
+}
+
+/**
+ * Parse NSE E1 `timeVal` — IST "dd-MMM-yyyy HH:mm:ss" (e.g. "06-Aug-2026 15:30:00")
+ * — into epoch ms. Returns null for anything unexpected (never throws, never guesses).
+ */
+export function parseNseTimeVal(raw: unknown): number | null {
+	if (typeof raw !== 'string') return null;
+	const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(raw.trim());
+	if (!m) return null;
+	const month = MONTHS[m[2]];
+	if (month === undefined) return null;
+	return istPartsToEpochMs(+m[3], month, +m[1], +m[4], +m[5], +m[6]);
+}
+
+/**
+ * Parse BSE `dttm` — IST "dd MMM yy | HH:mm" (e.g. "06 Aug 26 | 13:38") — into
+ * epoch ms, seconds defaulted to 0 (BSE does not carry them). Returns null for
+ * anything unexpected.
+ */
+export function parseBseDttm(raw: unknown): number | null {
+	if (typeof raw !== 'string') return null;
+	const m = /^(\d{1,2}) ([A-Za-z]{3}) (\d{2}) \| (\d{2}):(\d{2})$/.exec(raw.trim());
+	if (!m) return null;
+	const month = MONTHS[m[2]];
+	if (month === undefined) return null;
+	// BSE uses a 2-digit year; NSE-style quotes are all 2000+ so this is exact.
+	return istPartsToEpochMs(2000 + +m[3], month, +m[1], +m[4], +m[5], 0);
+}
 
 /** NSE index names feeding each underlying (SENSEX is BSE — never in this map). */
 export const NSE_INDEX_NAME_BY_UNDERLYING: Partial<Record<Underlying, string>> = {
@@ -118,6 +199,7 @@ export function extractNseCasTick(
 		changePct: casNum(row.icPerChange) ?? 0,
 		prevClose: positiveOrNull(row.previousClose),
 		ts,
+		upstreamTs: parseNseTimeVal(row.timeVal),
 		source: 'nse'
 	};
 }
@@ -193,6 +275,8 @@ export function extractNseMarketStatusNiftyTick(
 		changePct: ind.perChange,
 		prevClose: null,
 		ts,
+		// E3 carries no timestamp of its own — the E1 tick is the freshness source.
+		upstreamTs: null,
 		source: 'nse'
 	};
 }
@@ -322,6 +406,7 @@ export function extractBseCasTick(raw: unknown, ts: number = Date.now()): CasTic
 		changePct: bseNum(row.iclsPchg as string | number | null | undefined),
 		prevClose: positiveOrNull(row.Prev_Close),
 		ts,
+		upstreamTs: parseBseDttm(row.dttm as string | undefined),
 		source: 'bse'
 	};
 }

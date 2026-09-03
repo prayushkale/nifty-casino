@@ -215,6 +215,8 @@ async function completeLatest(
 			changePct: prevClose ? (changePts / prevClose) * 100 : 0,
 			prevClose,
 			ts: last.ts,
+			// Archive rows persist only ts/value — no upstream timestamp survives.
+			upstreamTs: null,
 			source: 'archive'
 		};
 	}

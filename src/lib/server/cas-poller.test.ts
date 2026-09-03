@@ -19,6 +19,7 @@ import { MemoryStore } from './db';
 import type { DayAnchorBook } from './cas-poller';
 import {
 	isCasPollerRunning,
+	logFreshness,
 	needsAnchor,
 	pollOnce,
 	pollerDisabled,
@@ -39,6 +40,7 @@ function payload(overrides: Partial<CasTickPayload> = {}): CasTickPayload {
 		changePct: 0.05,
 		prevClose: 24988,
 		ts: istAt(DAY, 15, 14, 0),
+		upstreamTs: null,
 		source: 'nse',
 		...overrides
 	};
@@ -306,8 +308,10 @@ describe('pollOnce — failure tolerance', () => {
 		expect(deps.hot.snapshot(undefined, new Date(istAt(DAY, 15, 14, 1))).ticks.sensex).toHaveLength(
 			1
 		);
-		expect(deps.log.warn).toHaveBeenCalledTimes(1);
-		expect(deps.log.warn.mock.calls[0]?.[0]).toContain('NSE E1 failed');
+		// The NSE-failure warn, plus (with these fixtures) the freshness warn — the
+		// fixture's dttm is far from the poll instant, which IS the stale-upstream case.
+		const warns = (deps.log.warn as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
+		expect(warns.some((w) => w.includes('NSE E1 failed'))).toBe(true);
 	});
 
 	it('does nothing harmful when both feeds come back empty (outside the window upstream)', async () => {
@@ -381,6 +385,34 @@ describe('pollOnce — failure tolerance', () => {
 		expect(istDateStr(now)).toBe(THURSDAY);
 		expect(await deps.store.closes.getIndexCloses(THURSDAY)).toHaveLength(3);
 		expect(await deps.store.closes.getIndexCloses(DAY)).toHaveLength(0);
+	});
+});
+
+describe('logFreshness — exchange-side age reporting', () => {
+	it('logs info when the oldest upstream payload is fresh, warn when stale', () => {
+		const now = istAt(DAY, 15, 22, 0);
+		const log = { info: vi.fn(), warn: vi.fn() };
+		logFreshness(
+			log,
+			[
+				payload({ ts: now, upstreamTs: now - 1_000 }),
+				payload({ ts: now, underlying: 'sensex', upstreamTs: now - 3_000 })
+			],
+			now
+		);
+		expect(log.info).toHaveBeenCalledTimes(1);
+		expect(String(log.info.mock.calls[0]?.[0])).toContain('sensex upstream age 3.0s');
+
+		logFreshness(log, [payload({ ts: now, upstreamTs: now - 25_000 })], now);
+		expect(log.warn).toHaveBeenCalledTimes(1);
+		expect(String(log.warn.mock.calls[0]?.[0])).toContain('arrived stale');
+	});
+
+	it('stays silent when the feed carried no timestamps', () => {
+		const log = { info: vi.fn(), warn: vi.fn() };
+		logFreshness(log, [payload({ ts: 0, upstreamTs: null })], 1000);
+		expect(log.info).not.toHaveBeenCalled();
+		expect(log.warn).not.toHaveBeenCalled();
 	});
 });
 

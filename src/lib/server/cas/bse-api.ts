@@ -13,7 +13,7 @@
  * hands back the raw rows as `unknown` so nothing upstream-shaped escapes.
  */
 import { BSE_BASE_URL_ENV, feedBaseUrl } from './feed-base-url';
-import { NseAPIError, type NseAPIErrorCode } from './nse-api';
+import { NseAPIError, logUpstreamCacheHeaders, type NseAPIErrorCode } from './nse-api';
 
 // `bseNum` is the pure BSE number parser; it lives with the other extractors so
 // ./types stays dependency-free. Re-exported here for API-layer ergonomics.
@@ -83,6 +83,7 @@ export async function fetchBseSensexRows(): Promise<unknown[]> {
 	}
 
 	const contentType = res.headers.get('content-type');
+	logUpstreamCacheHeaders('bse', res);
 	if (!res.ok || !contentType?.includes('application/json')) {
 		const body = await res.text().catch(() => '');
 		// classifyBseFailure only returns null for a usable JSON 200 — excluded above.
