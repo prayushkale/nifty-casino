@@ -293,6 +293,20 @@
 
 	<PhaseBanner {phase} tradeDate={state.tradeDate} now={$nowIst} />
 
+	<p
+		class="rounded-xl border border-gold-dim/40 bg-gold/5 px-4 py-2.5 text-sm text-zinc-600 dark:text-zinc-400"
+	>
+		<span aria-hidden="true">🎯</span>
+		<a
+			href="/how-to-win"
+			class="font-medium text-amber-700 underline decoration-gold-dim hover:text-amber-600 dark:text-gold dark:hover:text-gold-glow"
+			>How winning works</a
+		>
+		<span class="text-zinc-500 dark:text-zinc-500">
+			— exact call pays up to 28×, nearby pays less, a miss loses the stake.</span
+		>
+	</p>
+
 	{#if $stateError}
 		<p class="nc-alert flex flex-wrap items-center gap-1" role="alert">
 			{$stateError} —

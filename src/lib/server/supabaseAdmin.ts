@@ -16,7 +16,7 @@
  * rather than anywhere subtler.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { env } from '$env/dynamic/private';
+import { serverEnv as env } from '$lib/server/env';
 
 /** `SUPABASE_URL` is the canonical name; `PUBLIC_SUPABASE_URL` is the same value. */
 export const SUPABASE_URL_VARS = ['SUPABASE_URL', 'PUBLIC_SUPABASE_URL'] as const;

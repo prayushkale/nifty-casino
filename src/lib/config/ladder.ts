@@ -69,26 +69,43 @@ export type LadderIndexConfig = {
  * The launch ladder. SENSEX deliberately has NO 300 step: its round-number
  * spacing is 150/250/400/500 (PLAN §0.1), which is why `odds` is keyed by step
  * rather than derived from a position in `steps`.
+ *
+ * ACCURACY-GRADED: every step maps to the SAME MAX_HIT_ODDS — the chip shows
+ * "up to 28×" and settlement grades down from there by closeness. The per-step
+ * table is kept (same shape, same tests) so stored bets stay history-proof.
  */
 export const LADDER_CONFIG: Readonly<Record<LadderUnderlying, LadderIndexConfig>> = {
 	nifty: {
 		steps: [50, 100, 150, 200],
-		odds: { 50: 13.9, 100: 15.2, 150: 17.9, 200: 22.4 },
+		odds: { 50: 28, 100: 28, 150: 28, 200: 28 },
 		tolerancePts: 15
 	},
 	banknifty: {
 		steps: [100, 200, 300, 400],
-		odds: { 100: 18.3, 200: 19.1, 300: 21.3, 400: 24 },
+		odds: { 100: 28, 200: 28, 300: 28, 400: 28 },
 		tolerancePts: 30
 	},
 	sensex: {
 		steps: [150, 250, 400, 500],
-		odds: { 150: 17.2, 250: 17.8, 400: 20.3, 500: 22.4 },
+		odds: { 150: 28, 250: 28, 400: 28, 500: 28 },
 		tolerancePts: 40
 	}
 };
 
-/** Display (and generation) order of the indices. Mirrors the `underlying` CHECK. */
+/**
+ * Single max multiplier for an EXACT hit (err = 0), shared by every rung.
+ *
+ * ACCURACY-GRADED RULE (user-mandated): the multiplier depends on HOW CLOSE the
+ * close lands to the picked target — not on how far the target sits from the
+ * prev close. Exact = MAX_HIT_ODDS × stake, decaying LINEARLY to 0 at the
+ * tolerance edge: payout = stake × MAX × (1 − err/tol). A complete miss (or a
+ * wrong direction) pays 0; the dead-zone FLAT still refunds 1×.
+ *
+ * Tuned so the EASIEST rung (nifty ±50) still prices a house edge: at 28× its
+ * graded EV ≈ 0.90 (see scripts/simulate-ev.ts). Far rungs price a HIGHER house
+ * edge by design — the price of one max for every distance. All EVs stay < 1.
+ */
+export const MAX_HIT_ODDS = 28;
 export const LADDER_UNDERLYINGS: readonly LadderUnderlying[] = ['nifty', 'banknifty', 'sensex'];
 
 /**

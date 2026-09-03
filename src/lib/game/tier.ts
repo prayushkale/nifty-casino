@@ -28,6 +28,11 @@
  *      real move and falls through to the target test.
  *   3. `hit`     — the direction is right AND |Δ − signedTarget| ≤ tolerancePts.
  *      The band is inclusive on both edges (a bet "±50 ±15" owns 35 and 65 alike).
+ *      A hit is GRADED by accuracy (user-mandated): exact (err 0) pays the full
+ *      MAX odds, decaying LINEARLY to 0 at the tolerance edge —
+ *      accuracy = 1 − err/tol, payout = round(stake × maxOdds × accuracy).
+ *      The multiplier therefore depends on HOW CLOSE the close lands to the
+ *      picked target, never on how far that target sits from the prev close.
  *   4. `miss`    — everything else: wrong direction, or right direction but
  *      outside the band. FULL LOSS, no consolation tier (PLAN §0, user-mandated).
  */
@@ -88,19 +93,44 @@ export function computeTier(bet: TierBet, prevClose: number, close: number): Tie
 }
 
 /**
+ * Accuracy of a hit, 0..1: 1 = exactly on the target, 0 = at the tolerance
+ * edge (or outside it). Returns 0 for a wrong-direction or dead-zone outcome —
+ * callers should only price it alongside a `hit` tier.
+ *
+ *   accuracy = 1 − |Δ − signedTarget| / tolerancePts, clamped to [0, 1].
+ */
+export function hitAccuracy(bet: TierBet, prevClose: number, close: number): number {
+	if (!Number.isFinite(prevClose) || prevClose <= 0 || !Number.isFinite(close)) return 0;
+	const tol = LADDER_CONFIG[bet.underlying].tolerancePts;
+	if (!(tol > 0)) return 0;
+	const delta = close - prevClose;
+	const target = signedTargetPoints(bet);
+	if (Math.sign(delta) !== Math.sign(target)) return 0;
+	const err = Math.abs(delta - target);
+	if (err > tol) return 0;
+	return Math.max(0, Math.min(1, 1 - err / tol));
+}
+
+/**
  * What a settled bet credits back, in whole NC chips.
  *
- *   hit  → round(stake × odds) — odds are fractional (3.8), chips are not, so the
- *          product is rounded to the nearest chip. Round-half-up, the convention
- *          every other money figure in the app uses.
+ *   hit  → round(stake × maxOdds × accuracy) — exact pays the full max, the
+ *          tolerance edge pays 0 (continuous with a miss). `accuracy` defaults
+ *          to 1 (exact) so single-arg callers price the headline "up to" figure.
+ *          The legacy 3-arg form `payoutFor('hit', stake, odds)` prices an exact
+ *          hit at those odds and is kept for previews/tests.
  *   flat → stake (a 1× refund)
  *   miss → 0
  *
  * Non-finite inputs pay 0 rather than letting a NaN reach the ledger.
  */
-export function payoutFor(tier: PayableTier, stake: number, odds: number): number {
+export function payoutFor(tier: PayableTier, stake: number, odds: number, accuracy = 1): number {
 	if (!Number.isFinite(stake) || !Number.isFinite(odds) || stake <= 0) return 0;
-	if (tier === 'hit') return Math.round(stake * odds);
+	if (tier === 'hit') {
+		if (!Number.isFinite(accuracy)) return 0;
+		const a = Math.max(0, Math.min(1, accuracy));
+		return Math.round(stake * odds * a);
+	}
 	if (tier === 'flat') return Math.round(stake);
 	return 0;
 }

@@ -52,18 +52,18 @@
 			role="dialog"
 			aria-modal="true"
 			aria-label="{mode === 'edit' ? 'Confirm edit' : 'Confirm bet'} on {label}"
-			class="relative w-full max-w-md rounded-2xl border border-gold-dim/40 bg-felt-900 p-5 shadow-glow"
+			class="relative w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-xl dark:border-gold-dim/40 dark:bg-felt-900 dark:shadow-glow"
 		>
 			<header class="flex items-start justify-between gap-3">
 				<div>
 					<p class="text-[11px] uppercase tracking-widest text-zinc-500">
 						{mode === 'edit' ? 'Edit call' : 'Confirm call'}
 					</p>
-					<h2 class="text-lg font-semibold text-gold-glow">{label}</h2>
+					<h2 class="text-lg font-semibold text-amber-700 dark:text-gold-glow">{label}</h2>
 				</div>
 				<button
 					type="button"
-					class="-mr-2 -mt-2 flex h-11 w-11 items-center justify-center rounded-lg text-lg leading-none text-zinc-500 transition hover:text-zinc-200"
+					class="-mr-2 -mt-2 flex h-11 w-11 items-center justify-center rounded-lg text-lg leading-none text-zinc-500 transition hover:text-zinc-900 dark:hover:text-zinc-200"
 					aria-label="Close"
 					on:click={() => dispatch('cancel')}>✕</button
 				>
@@ -71,49 +71,64 @@
 
 			<dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
 				<div>
-					<dt class="text-[11px] uppercase tracking-wide text-zinc-600">The call</dt>
-					<dd class="num font-semibold {targetKind === 'up' ? 'text-up' : 'text-down'}">
+					<dt class="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
+						The call
+					</dt>
+					<dd
+						class="num font-semibold {targetKind === 'up'
+							? 'text-emerald-600 dark:text-up'
+							: 'text-rose-600 dark:text-down'}"
+					>
 						{arrow(targetKind)}
 						{targetKind === 'up' ? '+' : '−'}{formatNC(deltaPoints)}
 					</dd>
 				</div>
 				<div>
-					<dt class="text-[11px] uppercase tracking-wide text-zinc-600">Target close</dt>
-					<dd class="num font-semibold text-zinc-100">{level(target)}</dd>
+					<dt class="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
+						Target close
+					</dt>
+					<dd class="num font-semibold text-zinc-900 dark:text-zinc-100">{level(target)}</dd>
 				</div>
 				<div>
-					<dt class="text-[11px] uppercase tracking-wide text-zinc-600">Previous close</dt>
-					<dd class="num text-zinc-400">
+					<dt class="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
+						Previous close
+					</dt>
+					<dd class="num text-zinc-500 dark:text-zinc-400">
 						{prevClose === null ? '—' : level(prevClose)}
 					</dd>
 				</div>
 				<div>
-					<dt class="text-[11px] uppercase tracking-wide text-zinc-600">Odds</dt>
-					<dd class="num text-zinc-100">{odds}×</dd>
+					<dt class="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
+						Max odds
+					</dt>
+					<dd class="num text-zinc-900 dark:text-zinc-100">up to {odds}×</dd>
 				</div>
 				<div>
-					<dt class="text-[11px] uppercase tracking-wide text-zinc-600">Stake</dt>
-					<dd class="num font-semibold text-gold">{formatNC(stake)} NC</dd>
+					<dt class="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
+						Stake
+					</dt>
+					<dd class="num font-semibold text-amber-700 dark:text-gold">{formatNC(stake)} NC</dd>
 				</div>
 				<div>
-					<dt class="text-[11px] uppercase tracking-wide text-zinc-600">If you hit</dt>
-					<dd class="num font-semibold text-up">+{formatNC(potential)} NC</dd>
+					<dt class="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
+						If exact
+					</dt>
+					<dd class="num font-semibold text-emerald-600 dark:text-up">+{formatNC(potential)} NC</dd>
 				</div>
 			</dl>
 
 			<p
-				class="mt-4 rounded-lg border border-down/40 bg-down/10 px-3 py-2.5 text-xs leading-relaxed text-down"
+				class="mt-4 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2.5 text-xs leading-relaxed text-rose-700 dark:border-down/40 dark:bg-down/10 dark:text-down"
 			>
 				<strong class="font-semibold">Wrong call = stake LOST (full loss).</strong>
-				Only a dead-flat market refunds. {label} closing {dirWord(targetKind)}
-				{formatNC(deltaPoints)}
-				points by more than the band pays nothing.
+				Only a dead-flat market refunds. Payout grades down the further the close lands from the target
+				— nearby pays less, outside the band pays nothing.
 			</p>
 
 			{#if balanceAfter !== null}
 				<p class="mt-3 text-xs text-zinc-500">
 					Balance after:
-					<span class="num text-zinc-300">{formatNC(balanceAfter)} NC</span>
+					<span class="num text-zinc-700 dark:text-zinc-300">{formatNC(balanceAfter)} NC</span>
 				</p>
 			{/if}
 
@@ -125,7 +140,7 @@
 					href="/terms#payouts"
 					target="_blank"
 					rel="noopener noreferrer"
-					class="text-gold underline decoration-gold-dim hover:text-gold-glow"
+					class="text-amber-700 underline decoration-gold-dim hover:text-amber-600 dark:text-gold dark:hover:text-gold-glow"
 				>
 					Read the payout rules<span class="sr-only"> (opens in a new tab)</span> ↗
 				</a>

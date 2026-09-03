@@ -221,29 +221,40 @@ describe('projectedPayout — the same verdicts the settlement engine reaches', 
 	it('shows a hit when the live value sits on the target', () => {
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_050, 100)).toEqual({
 			tier: 'hit',
-			payout: 600
+			payout: 600,
+			accuracy: 1
 		});
 	});
 
-	it('shows a hit on the inclusive tolerance edge, a miss one tick past it', () => {
+	it('grades the payout by accuracy: halfway pays half, the edge pays nothing', () => {
+		// err 7.5 of tol 15 → accuracy 0.5 → half the exact payout.
+		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_057.5, 100)).toEqual({
+			tier: 'hit',
+			payout: 300,
+			accuracy: 0.5
+		});
+		// Inclusive edge is still a hit tier, but accuracy 0 prices nothing.
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_065, 100)).toEqual({
 			tier: 'hit',
-			payout: 600
+			payout: 0,
+			accuracy: 0
 		});
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_065.01, 100)).toEqual({
 			tier: 'miss',
-			payout: 0
+			payout: 0,
+			accuracy: 1
 		});
 	});
 
 	it('shows the flat refund inside the dead zone, in either direction', () => {
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_010, 100)).toEqual({
 			tier: 'flat',
-			payout: 100
+			payout: 100,
+			accuracy: 1
 		});
 		expect(
 			projectedPayout(opt('nifty', 'down', 50, 6), anchors(NIFTY_ANCHOR), 25_010, 100)
-		).toEqual({ tier: 'flat', payout: 100 });
+		).toEqual({ tier: 'flat', payout: 100, accuracy: 1 });
 		// Exactly half a step is a real move, not a refund.
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_025, 100)?.tier).toBe('miss');
 	});
@@ -251,10 +262,11 @@ describe('projectedPayout — the same verdicts the settlement engine reaches', 
 	it('shows the full loss for a wrong direction and for an overshot target', () => {
 		expect(
 			projectedPayout(opt('nifty', 'down', 50, 6), anchors(NIFTY_ANCHOR), 25_050, 100)
-		).toEqual({ tier: 'miss', payout: 0 });
+		).toEqual({ tier: 'miss', payout: 0, accuracy: 1 });
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_200, 100)).toEqual({
 			tier: 'miss',
-			payout: 0
+			payout: 0,
+			accuracy: 1
 		});
 	});
 
@@ -268,11 +280,13 @@ describe('projectedPayout — the same verdicts the settlement engine reaches', 
 	it('quotes a stake of 1 NC by default, which is the bare multiplier', () => {
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_050)).toEqual({
 			tier: 'hit',
-			payout: 6
+			payout: 6,
+			accuracy: 1
 		});
 		expect(projectedPayout(up50, anchors(NIFTY_ANCHOR), 25_010)).toEqual({
 			tier: 'flat',
-			payout: 1
+			payout: 1,
+			accuracy: 1
 		});
 	});
 

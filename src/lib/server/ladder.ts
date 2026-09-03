@@ -33,6 +33,7 @@ import {
 	type LadderTargetKind,
 	type LadderUnderlying
 } from '$lib/config/ladder';
+import { fillAnchorsFromLive, type LiveCloseDeps } from '$lib/server/live-closes';
 import { isWeekend, shiftIstDate } from '$lib/time/ist';
 import { getStore, type GameStore } from '$lib/server/db';
 import type { IndexClose, Underlying } from '$lib/server/db/types';
@@ -183,21 +184,70 @@ export function invalidateLadderCache(): void {
 }
 
 /**
+ * The day's ladder with the live previous-close fallback.
+ *
+ * `getLadderForDate` is DB-only by design (pure, cacheable, hermetic in tests).
+ * This wrapper layers the best-effort live feed over it: any index whose DB
+ * anchor is null is re-anchored on the last closing price the NSE/BSE feeds
+ * carry right now, and the options are regenerated from the merged anchors —
+ * so a logged-in player sees bettable ladders from 15:00 even when the
+ * poller's `live_approx` anchor row has not landed yet.
+ *
+ * The merged ladder is NOT written to the DB cache: the DB row, once the
+ * poller writes it, carries the same previous-day close, so the two agree and
+ * there is nothing to reconcile at settlement. `liveDeps` injects the fetchers
+ * (tests) — omit it in production to hit the real feeds.
+ */
+export async function getLadderForDateWithLiveFallback(
+	store: GameStore,
+	tradeDate: string,
+	liveDeps: LiveCloseDeps | false = {}
+): Promise<LadderForDate> {
+	const ladder = await getLadderForDate(store, tradeDate);
+	if (liveDeps === false) return ladder;
+	if (
+		ladder.anchors.nifty !== null &&
+		ladder.anchors.banknifty !== null &&
+		ladder.anchors.sensex !== null
+	) {
+		return ladder;
+	}
+	const anchors = await fillAnchorsFromLive(ladder.anchors, liveDeps);
+	return {
+		tradeDate: ladder.tradeDate,
+		anchors,
+		options: generateLadderOptions(anchors),
+		generatedAt: ladder.generatedAt
+	};
+}
+
+/**
  * Validate a pick against today's ladder and return it with its configured odds —
  * or null when it is not on the ladder, which the bet service maps to
  * `INVALID_TARGET` (400).
  *
  * `store` defaults to the process store so the T7 call site stays short; tests
  * pass one explicitly.
+ *
+ * `live` opts into the live previous-close fallback (see
+ * {@link getLadderForDateWithLiveFallback}): when the DB has no anchor for the
+ * bet's underlying, the pick is validated against a ladder built from the last
+ * closing price the feeds carry right now. `false`/omitted (the default) keeps
+ * the historical DB-only behaviour — hermetic in tests. The bet service passes
+ * a live value so a ladder the player could SEE is a ladder they can BET.
  */
 export async function resolveLadderOption(
 	tradeDate: string,
 	underlying: LadderUnderlying,
 	targetKind: LadderTargetKind,
 	deltaPoints: number,
-	store: GameStore = getStore()
+	store: GameStore = getStore(),
+	live: LiveCloseDeps | false = false
 ): Promise<LadderOption | null> {
-	const ladder = await getLadderForDate(store, tradeDate);
+	const ladder =
+		live === false
+			? await getLadderForDate(store, tradeDate)
+			: await getLadderForDateWithLiveFallback(store, tradeDate, live);
 	return (
 		ladder.options.find(
 			(option) =>

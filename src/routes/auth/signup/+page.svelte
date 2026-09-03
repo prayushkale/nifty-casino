@@ -42,7 +42,8 @@
 				return;
 			}
 			// Confirmations are off in this project — the session is already live.
-			await goto('/');
+			// Re-run server loads with the fresh cookies so `/` paints signed in.
+			await goto('/', { invalidateAll: true });
 		} finally {
 			busy = false;
 		}

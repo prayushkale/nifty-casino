@@ -21,6 +21,18 @@ import type { Underlying } from '$lib/server/db/types';
 import { istAt, THURSDAY, WEDNESDAY } from '$lib/server/cas/test-clock';
 import type { StatePayload } from '$lib/server/state';
 
+// The ladder's live previous-close fallback must stay out of this suite: the
+// route enables it by default, and the empty-DB test would otherwise spend the
+// NSE/BSE timeouts on the real network. Nulls preserve the DB-only ladder
+// every assertion below was written against.
+vi.mock('$lib/server/live-closes', async (importOriginal) => {
+	const mod = await importOriginal<typeof import('$lib/server/live-closes')>();
+	return {
+		...mod,
+		fetchLivePrevCloses: async () => ({ nifty: null, banknifty: null, sensex: null })
+	};
+});
+
 const DAY = THURSDAY;
 const USER = '11111111-1111-4111-8111-111111111111';
 const HANDLE = 'priya';
@@ -111,9 +123,7 @@ async function seedTwoBets(): Promise<void> {
 	await getStore().settleBets({
 		sessionId: session?.id ?? 0,
 		tradeDate: DAY,
-		outcomes: [
-			{ betId: older.id, userId: USER, stake: 100, odds: 13.9, tier: 'hit', payout: 1390 }
-		],
+		outcomes: [{ betId: older.id, userId: USER, stake: 100, odds: 28, tier: 'hit', payout: 2800 }],
 		settledAtMs: istAt(DAY, 15, 45, 0)
 	});
 }
@@ -177,10 +187,10 @@ describe('GET /api/state (signed in)', () => {
 
 		const body = (await (await get()).json()) as StatePayload;
 
-		// 1000 − 100 − 300 staked, +1390 paid back to a HIT.
+		// 1000 − 100 − 300 staked, +2800 paid back to an exact HIT.
 		expect(body.user).toMatchObject({
 			handle: HANDLE,
-			balance: SIGNUP_BONUS - 400 + 1390,
+			balance: SIGNUP_BONUS - 400 + 2800,
 			xp: 0,
 			streakDays: 0,
 			lastBetDate: null,
@@ -190,8 +200,8 @@ describe('GET /api/state (signed in)', () => {
 			betsPlaced: 2,
 			betsWon: 1,
 			totalStaked: 400,
-			totalWon: 1390,
-			bestPayout: 1390
+			totalWon: 2800,
+			bestPayout: 2800
 		});
 
 		// Newest first, and only the fields the strip renders.
@@ -200,7 +210,7 @@ describe('GET /api/state (signed in)', () => {
 			underlying: 'sensex',
 			targetKind: 'down',
 			deltaPoints: 250,
-			odds: 17.8,
+			odds: 28,
 			stake: 300,
 			settlementTier: null,
 			payout: null
@@ -209,18 +219,18 @@ describe('GET /api/state (signed in)', () => {
 			underlying: 'nifty',
 			targetKind: 'up',
 			deltaPoints: 50,
-			odds: 13.9,
+			odds: 28,
 			stake: 100,
 			settlementTier: 'hit',
-			payout: 1390
+			payout: 2800
 		});
 
-		// The pot moved with the bets: two, 400 staked, 1390 paid out, one player.
+		// The pot moved with the bets: two, 400 staked, 2800 paid out, one player.
 		expect(body.pot.today).toMatchObject({
 			tradeDate: DAY,
 			totalBets: 2,
 			totalStaked: 400,
-			totalPaidOut: 1390,
+			totalPaidOut: 2800,
 			playersCount: 1
 		});
 	});

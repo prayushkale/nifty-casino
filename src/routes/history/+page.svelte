@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { PageData } from './$types';
+	import SubpageNav from '$lib/components/game/SubpageNav.svelte';
 	import { INDEX_LABELS } from '$lib/stores/game';
 	import { istDateStr, secOfDayIst } from '$lib/time/ist';
 	import type { LadderUnderlying } from '$lib/config/ladder';
@@ -49,12 +50,16 @@
 	const TIER_BADGE: Record<Tier, string> = { hit: '🎯', flat: '➖', miss: '💀' };
 	const TIER_LABEL: Record<Tier, string> = { hit: 'HIT', flat: 'FLAT', miss: 'MISS' };
 	const TIER_COLOR: Record<Tier, string> = {
-		hit: 'border-up/40 bg-up/10 text-up',
-		flat: 'border-felt-700 bg-felt-800 text-zinc-400',
-		miss: 'border-down/40 bg-down/10 text-down'
+		hit: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:border-up/40 dark:bg-up/10 dark:text-up',
+		flat: 'border-zinc-300 bg-zinc-100 text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-400',
+		miss: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:border-down/40 dark:bg-down/10 dark:text-down'
 	};
 
-	const TONES: Record<Tier, string> = { hit: 'text-up', flat: 'text-zinc-400', miss: 'text-down' };
+	const TONES: Record<Tier, string> = {
+		hit: 'text-emerald-600 dark:text-up',
+		flat: 'text-zinc-500 dark:text-zinc-400',
+		miss: 'text-rose-600 dark:text-down'
+	};
 
 	/**
 	 * Index display name. A helper rather than a lookup in the markup: `{@const}`
@@ -75,8 +80,8 @@
 				badge: '⏳',
 				label: 'LIVE',
 				amount: '—',
-				amountTone: 'text-zinc-600',
-				tone: 'border-gold-dim/50 bg-gold/10 text-gold'
+				amountTone: 'text-zinc-500 dark:text-zinc-600',
+				tone: 'border-gold-dim/50 bg-gold/10 text-amber-700 dark:text-gold'
 			};
 		}
 		const tier = bet.settlementTier as Tier;
@@ -165,52 +170,58 @@
 </svelte:head>
 
 <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 py-8">
+	<SubpageNav />
 	<header class="flex flex-wrap items-end justify-between gap-3">
 		<div>
 			<p class="text-xs font-medium uppercase tracking-widest text-zinc-500">Your record</p>
-			<h1 class="text-2xl font-semibold text-gold-glow sm:text-3xl">Bet history</h1>
+			<h1 class="text-2xl font-semibold text-amber-600 dark:text-gold-glow sm:text-3xl">
+				Bet history
+			</h1>
 		</div>
-		<a href="/" class="nc-btn-ghost text-xs">Back to the tables</a>
 	</header>
 
 	<!-- ── personal totals — the same numbers the public profile shows, but yours ── -->
 	<section class="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-label="Your totals">
-		<div class="rounded-xl border border-felt-700 bg-felt-900/80 p-4 shadow-card">
+		<div class="nc-card p-4">
 			<p class="nc-label mb-1">Bets</p>
-			<p class="num text-xl font-semibold text-zinc-100">{fmt(data.totals.betsPlaced)}</p>
-			<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-600">
+			<p class="num text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+				{fmt(data.totals.betsPlaced)}
+			</p>
+			<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
 				{fmt(data.totals.betsWon)} won
 			</p>
 		</div>
-		<div class="rounded-xl border border-felt-700 bg-felt-900/80 p-4 shadow-card">
+		<div class="nc-card p-4">
 			<p class="nc-label mb-1">Win rate</p>
-			<p class="num text-xl font-semibold text-zinc-100">
+			<p class="num text-xl font-semibold text-zinc-900 dark:text-zinc-100">
 				{data.totals.winRate === null ? '—' : `${Math.round(data.totals.winRate * 100)}%`}
 			</p>
-			<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-600">all-time</p>
+			<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+				all-time
+			</p>
 		</div>
-		<div class="rounded-xl border border-felt-700 bg-felt-900/80 p-4 shadow-card">
+		<div class="nc-card p-4">
 			<p class="nc-label mb-1">Staked</p>
-			<p class="num text-xl font-semibold text-zinc-100">🪙 {fmt(data.totals.totalStaked)}</p>
-			<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-600">
+			<p class="num text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+				🪙 {fmt(data.totals.totalStaked)}
+			</p>
+			<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
 				won {fmt(data.totals.totalWon)}
 			</p>
 		</div>
-		<div
-			class="rounded-xl border border-felt-700 bg-felt-900/80 p-4 shadow-card sm:col-span-3 sm:flex sm:items-baseline sm:justify-between"
-		>
+		<div class="nc-card p-4 sm:col-span-3 sm:flex sm:items-baseline sm:justify-between">
 			<p class="nc-label mb-1 sm:mb-0">Best payout</p>
-			<p class="num text-xl font-semibold text-gold-glow">
+			<p class="num text-xl font-semibold text-amber-600 dark:text-gold-glow">
 				{data.totals.bestPayout === 0 ? '—' : `+${fmt(data.totals.bestPayout)} NC`}
 			</p>
 		</div>
 	</section>
 
 	<!-- ── the log ──────────────────────────────────────────────────────────────── -->
-	<section class="rounded-xl border border-felt-700 bg-felt-900/80 shadow-card">
+	<section class="nc-card overflow-hidden">
 		<!-- Filters: client-side over the pages loaded so far, ≥44px tall to tap. -->
 		<div
-			class="flex flex-wrap gap-1.5 border-b border-felt-800 px-3 py-2.5"
+			class="flex flex-wrap gap-1.5 border-b border-zinc-200 px-3 py-2.5 dark:border-felt-800"
 			role="group"
 			aria-label="Filter your bets"
 		>
@@ -219,8 +230,8 @@
 					type="button"
 					class="min-h-[36px] rounded-full border px-3 py-1 text-xs font-semibold transition-colors {filter ===
 					tab.id
-						? 'border-gold-dim bg-gold/15 text-gold'
-						: 'border-felt-700 text-zinc-400 hover:border-gold-dim hover:text-gold'}"
+						? 'border-gold-dim bg-gold/15 text-amber-700 dark:text-gold'
+						: 'border-zinc-300 text-zinc-500 hover:border-gold-dim hover:text-amber-700 dark:border-felt-700 dark:text-zinc-400 dark:hover:text-gold'}"
 					aria-pressed={filter === tab.id}
 					on:click={() => (filter = tab.id)}
 				>
@@ -233,8 +244,8 @@
 		{#if data.totals.betsPlaced === 0 && bets.length === 0}
 			<div class="flex flex-col items-center gap-3 px-6 py-10 text-center">
 				<p class="text-3xl" aria-hidden="true">🧾</p>
-				<p class="text-sm text-zinc-400">No bets yet.</p>
-				<p class="max-w-sm text-xs text-zinc-600">
+				<p class="text-sm text-zinc-500 dark:text-zinc-400">No bets yet.</p>
+				<p class="max-w-sm text-xs text-zinc-500 dark:text-zinc-500">
 					Your calls land here the moment you place them — picks, stakes and the verdict after the
 					15:20 cutoff.
 				</p>
@@ -245,29 +256,37 @@
 				No {FILTERS.find((tab) => tab.id === filter)?.label.toLowerCase()} in the pages loaded.
 			</p>
 		{:else}
-			<ul class="divide-y divide-felt-800">
+			<ul class="divide-y divide-zinc-200 dark:divide-felt-800">
 				{#each visible as bet (bet.id)}
 					{@const verdict = verdictOf(bet)}
 					{@const name = indexLabel(bet.underlying)}
 					<li class="flex min-h-[44px] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
 						<span class="min-w-0 flex-1">
 							<span
-								class="block truncate text-sm font-semibold uppercase tracking-wide text-zinc-200"
+								class="block truncate text-sm font-semibold uppercase tracking-wide text-zinc-900 dark:text-zinc-200"
 							>
 								{name}
-								<span class={bet.targetKind === 'up' ? 'text-up' : 'text-down'}>
+								<span
+									class={bet.targetKind === 'up'
+										? 'text-emerald-600 dark:text-up'
+										: 'text-rose-600 dark:text-down'}
+								>
 									{bet.targetKind === 'up' ? '▲' : '▼'}{fmt(bet.deltaPoints)}
 								</span>
 							</span>
-							<span class="mt-0.5 block text-[11px] uppercase tracking-wide text-zinc-600">
+							<span
+								class="mt-0.5 block text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400"
+							>
 								{stamp(bet.createdAt)}
-								<span class="text-zinc-700" aria-hidden="true">·</span>
+								<span class="text-zinc-300 dark:text-zinc-700" aria-hidden="true">·</span>
 								staked {fmt(bet.stake)}
-								<span class="text-zinc-700" aria-hidden="true">·</span>
+								<span class="text-zinc-300 dark:text-zinc-700" aria-hidden="true">·</span>
 								<span class="num">{bet.odds}×</span>
 							</span>
 						</span>
-						<span class="shrink-0 text-right text-[11px] uppercase tracking-wide text-zinc-600">
+						<span
+							class="shrink-0 text-right text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500"
+						>
 							{bet.settledAt === null ? 'unsettled' : stamp(bet.settledAt)}
 						</span>
 						<span
@@ -284,11 +303,16 @@
 			</ul>
 
 			{#if loadError}
-				<p class="border-t border-felt-800 px-4 py-3 text-sm text-down" role="alert">{loadError}</p>
+				<p
+					class="border-t border-zinc-200 px-4 py-3 text-sm text-rose-600 dark:border-felt-800 dark:text-down"
+					role="alert"
+				>
+					{loadError}
+				</p>
 			{/if}
 
 			{#if cursor !== null}
-				<div class="border-t border-felt-800 p-3">
+				<div class="border-t border-zinc-200 p-3 dark:border-felt-800">
 					<button
 						type="button"
 						class="nc-btn-ghost min-h-[44px] w-full"
@@ -302,7 +326,7 @@
 		{/if}
 	</section>
 
-	<p class="text-center text-[11px] text-zinc-600">
+	<p class="text-center text-[11px] text-zinc-500 dark:text-zinc-500">
 		Your log only — nobody else's bets appear here. Stakes are play-money NC.
 	</p>
 </div>

@@ -26,7 +26,7 @@
  */
 import { get, writable, type Readable, type Writable } from 'svelte/store';
 import { BETTING_START_HMS, CUTOFF_HMS, MAX_STAKE, MIN_STAKE } from '$lib/config/app';
-import { computeTier, payoutFor, type PayableTier } from '$lib/game/tier';
+import { computeTier, hitAccuracy, payoutFor, type PayableTier } from '$lib/game/tier';
 import type { LadderOption, LadderUnderlying } from '$lib/config/ladder';
 import {
 	hmsToSeconds,
@@ -225,7 +225,7 @@ export function formatDurationShort(ms: number): string {
 // the if-closed-now projection
 // ---------------------------------------------------------------------------
 
-export type Projection = { tier: PayableTier; payout: number };
+export type Projection = { tier: PayableTier; payout: number; accuracy: number };
 
 /**
  * What `option` would pay if the index closed at `latestValue` right now.
@@ -233,8 +233,10 @@ export type Projection = { tier: PayableTier; payout: number };
  * THE SAME ARITHMETIC THE SETTLEMENT ENGINE RUNS (`$lib/game/tier`), fed a
  * hypothetical close instead of the official one — the server settles with the
  * official close, this previews with the live indicative, and nothing else
- * differs. `stake` is quoted separately so the same helper serves both the bet
- * strip (the real stake) and the chip tooltip (1 NC, i.e. the bare multiplier).
+ * differs. Accuracy-graded: the closer the live value to the target, the higher
+ * the preview, decaying linearly to 0 at the tolerance edge. `stake` is quoted
+ * separately so the same helper serves both the bet strip (the real stake) and
+ * the chip tooltip (1 NC, i.e. the bare multiplier).
  *
  * `null` means "no honest answer yet": no usable anchor, no live value, or an
  * `abstain` verdict — rendered as an em dash, never as a zero.
@@ -254,7 +256,8 @@ export function projectedPayout(
 
 	const tier = computeTier(option, anchor, latestValue);
 	if (tier === 'abstain') return null;
-	return { tier, payout: payoutFor(tier, stake, option.odds) };
+	const accuracy = tier === 'hit' ? hitAccuracy(option, anchor, latestValue) : 1;
+	return { tier, payout: payoutFor(tier, stake, option.odds, accuracy), accuracy };
 }
 
 // ---------------------------------------------------------------------------

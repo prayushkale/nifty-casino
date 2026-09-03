@@ -24,7 +24,7 @@
 import { createServerClient } from '@supabase/ssr';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Cookies } from '@sveltejs/kit';
-import { env } from '$env/dynamic/private';
+import { serverEnv as env } from '$lib/server/env';
 
 /** Same value as `PUBLIC_SUPABASE_URL` in ../supabaseAdmin.ts and $lib/supabaseBrowser.ts. */
 export const SUPABASE_AUTH_URL_VARS = ['SUPABASE_URL', 'PUBLIC_SUPABASE_URL'] as const;

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { afterNavigate } from '$app/navigation';
+	import { afterNavigate, goto, invalidateAll } from '$app/navigation';
 	import { browser } from '$app/environment';
 	import { page } from '$app/stores';
 	import '../app.css';
@@ -58,7 +58,13 @@
 		busy = true;
 		try {
 			await fetch('/api/auth/logout', { method: 'POST' });
+			// Drop the wallet snapshot — it belongs to the signed-out player, and
+			// the next paint must not flash their balance before `refresh` lands.
+			gameState.set(null);
+			me = null;
+			await invalidateAll();
 			await refresh();
+			await goto('/', { invalidateAll: true });
 		} finally {
 			busy = false;
 		}
@@ -67,6 +73,10 @@
 	onMount(() => {
 		theme.init();
 		const stopClock = startClock();
+		// `afterNavigate` only fires on client-side navigations, so the very first
+		// paint would otherwise leave `me` null — and the header showing Log in /
+		// Sign up — even for a player whose SSR state already has them signed in.
+		void refresh();
 		return stopClock;
 	});
 	afterNavigate(refresh);
@@ -81,8 +91,22 @@
 	$: if (browser && pageState) seedState(pageState);
 	$: state = $gameState ?? pageState;
 	$: phase = state === null ? null : bettingPhase(state, $nowIst);
+	// Auth display state. `me` is the session truth, but it only arrives after a
+	// client fetch — on first paint it is still null while the SSR `state` may
+	// already carry the signed-in wallet. Either one proves signed-in; requiring
+	// `me` alone is what stuck the header on Log in / Sign up after login.
+	$: signedIn = state?.user ? true : (me?.authenticated ?? false);
 	$: handle = state?.user?.handle ?? (me?.authenticated ? me.handle : null);
 	$: isLight = $theme === 'light';
+	$: pathname = $page.url.pathname;
+	/** Desktop primary nav — the footer + mobile bottom nav already cover small screens. */
+	$: navLink = (href: string): string => {
+		const active = href === '/' ? pathname === '/' : pathname.startsWith(href);
+		const base =
+			'inline-flex min-h-[36px] items-center gap-1 rounded-lg px-2.5 text-sm font-medium transition';
+		if (active) return `${base} ${isLight ? 'bg-zinc-100 text-zinc-900' : 'bg-felt-800 text-gold'}`;
+		return `${base} ${isLight ? 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900' : 'text-zinc-400 hover:bg-felt-800 hover:text-zinc-100'}`;
+	};
 </script>
 
 <header
@@ -104,6 +128,30 @@
 				class={isLight ? 'text-zinc-800' : 'text-zinc-200'}>ino</span
 			>
 		</a>
+
+		<!-- Primary nav: always-visible way back to the game + the other main pages.
+		     Mobile gets the same destinations from the fixed bottom nav. -->
+		<nav class="hidden items-center gap-1 lg:flex" aria-label="Primary">
+			<a href="/" class={navLink('/')} aria-current={pathname === '/' ? 'page' : undefined}>
+				<span aria-hidden="true">🎰</span> Game
+			</a>
+			<a
+				href="/leaderboard"
+				class={navLink('/leaderboard')}
+				aria-current={pathname.startsWith('/leaderboard') ? 'page' : undefined}
+			>
+				<span aria-hidden="true">🏆</span> Board
+			</a>
+			{#if signedIn}
+				<a
+					href="/history"
+					class={navLink('/history')}
+					aria-current={pathname.startsWith('/history') ? 'page' : undefined}
+				>
+					<span aria-hidden="true">🧾</span> History
+				</a>
+			{/if}
+		</nav>
 
 		<!-- The desktop bar carries everything; mobile repeats the money row below. -->
 		<div class="hidden items-center gap-2 md:flex">
@@ -132,17 +180,19 @@
 				<span aria-hidden="true">{isLight ? '🌙' : '☀️'}</span>
 				<span class="hidden sm:inline">{isLight ? 'Dark' : 'Light'}</span>
 			</button>
-			{#if me?.authenticated && me.handle}
+			{#if signedIn}
 				<div class="md:hidden">
 					<BalanceChip balance={state?.user?.balance ?? null} {handle} />
 				</div>
-				<a
-					href={`/u/${me.handle}`}
-					class="nc-chip hidden sm:inline-flex"
-					title="Your public profile"
-				>
-					{me.handle}
-				</a>
+				{#if handle}
+					<a
+						href={`/u/${handle}`}
+						class="nc-chip hidden sm:inline-flex"
+						title="Your public profile"
+					>
+						{handle}
+					</a>
+				{/if}
 				<button class="nc-btn-ghost" type="button" on:click={logout} disabled={busy}>
 					{busy ? '…' : 'Log out'}
 				</button>

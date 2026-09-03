@@ -25,7 +25,8 @@
 import { AUCTION_END_HMS, AUCTION_START_HMS, BETTING_START_HMS, CUTOFF_HMS } from '$lib/config/app';
 import { isBetweenHMS, istDateStr, shiftIstDate } from '$lib/time/ist';
 import type { LadderOption, LadderUnderlying } from '$lib/config/ladder';
-import { getLadderForDate } from '$lib/server/ladder';
+import { getLadderForDateWithLiveFallback } from '$lib/server/ladder';
+import type { LiveCloseDeps } from '$lib/server/live-closes';
 import { getStore, type GameStore } from '$lib/server/db';
 import type {
 	Bet,
@@ -213,6 +214,15 @@ export type StateOptions = {
 	/** The instant the payload is judged at. Defaults to now; tests pin it. */
 	now?: Date;
 	/**
+	 * Live previous-close fallback for the ladder (see
+	 * `getLadderForDateWithLiveFallback`). Defaults to the real feeds: when the
+	 * DB has no anchor yet, the ladder is built from the last closing price
+	 * NSE/BSE carry right now so a logged-in player sees bettable ladders.
+	 * Pass `false` to keep the DB-only ladder (hermetic tests), or inject
+	 * fetchers to simulate the feeds.
+	 */
+	live?: LiveCloseDeps | false;
+	/**
 	 * The identity resolved by `hooks.server.ts`. `null`/`undefined` ⇒ the
 	 * anonymous payload (`user: null`, `myBets: []`). Never a handle: the handle
 	 * is looked up from the profile so the payload cannot disagree with the row.
@@ -232,12 +242,15 @@ export async function buildStatePayload(options: StateOptions = {}): Promise<Sta
 	const serverNow = now.getTime();
 	const tradeDate = istDateStr(now);
 
-	// Independent reads, so they run together. The ladder is process-cached per
-	// trade date, so this is a DB walk once a day and a cache hit after that.
+	// Independent reads, so they run together. The DB ladder is process-cached
+	// per trade date, so this is a DB walk once a day and a cache hit after that;
+	// the live fallback only fires while some anchor is still null (fresh deploy
+	// or pre-15:13:30), is best-effort, and never writes — the GET stays free to
+	// repeat.
 	const [session, pot, ladder] = await Promise.all([
 		store.sessions.getSessionByDate(tradeDate),
 		buildPotSnapshot(store, tradeDate),
-		getLadderForDate(store, tradeDate)
+		getLadderForDateWithLiveFallback(store, tradeDate, options.live ?? {})
 	]);
 
 	const head = {

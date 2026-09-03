@@ -47,6 +47,7 @@ import {
 } from '$lib/server/db';
 import { UNDERLYINGS, type Bet, type TargetKind, type Underlying } from '$lib/server/db/types';
 import { resolveLadderOption } from '$lib/server/ladder';
+import type { LiveCloseDeps } from '$lib/server/live-closes';
 
 // ---------------------------------------------------------------------------
 // typed errors — the service's whole HTTP contract
@@ -147,12 +148,24 @@ export type BetCallOptions = {
 	now?: Date;
 	/** Defaults to the process store (`getStore()`). */
 	store?: GameStore;
+	/**
+	 * Live previous-close fallback for ladder validation. Defaults to the real
+	 * feeds so a ladder the player could SEE is a ladder they can BET — the
+	 * fallback only fires when the DB has no anchor for the bet's underlying.
+	 * Pass `false` for the DB-only ladder (hermetic tests), or inject fetchers
+	 * to simulate the feeds.
+	 */
+	live?: LiveCloseDeps | false;
 };
 
-type ResolvedOptions = { now: Date; store: GameStore };
+type ResolvedOptions = { now: Date; store: GameStore; live: LiveCloseDeps | false };
 
 function resolveOptions(options: BetCallOptions = {}): ResolvedOptions {
-	return { now: options.now ?? new Date(), store: options.store ?? getStore() };
+	return {
+		now: options.now ?? new Date(),
+		store: options.store ?? getStore(),
+		live: options.live ?? {}
+	};
 }
 
 function isUnderlying(value: unknown): value is Underlying {
@@ -241,7 +254,7 @@ export async function placeBet(
 	request: BetRequest,
 	options: BetCallOptions = {}
 ): Promise<Bet> {
-	const { now, store } = resolveOptions(options);
+	const { now, store, live } = resolveOptions(options);
 	const underlying = assertUnderlying(request.underlying);
 	const targetKind = assertTargetKind(request.targetKind);
 	const deltaPoints = assertDeltaPoints(request.deltaPoints);
@@ -254,7 +267,8 @@ export async function placeBet(
 		underlying,
 		targetKind,
 		deltaPoints,
-		store
+		store,
+		live
 	);
 	if (!option) {
 		throw new BetError('INVALID_TARGET', 'That target is not on today’s ladder.', {
@@ -296,7 +310,7 @@ export async function editBet(
 	patch: BetPatch,
 	options: BetCallOptions = {}
 ): Promise<Bet> {
-	const { now, store } = resolveOptions(options);
+	const { now, store, live } = resolveOptions(options);
 
 	// Validate before opening the transaction: a bad field must not cost a lock.
 	const nextTargetKind = patch.targetKind === undefined ? null : assertTargetKind(patch.targetKind);
@@ -340,7 +354,8 @@ export async function editBet(
 					bet.underlying,
 					targetKind,
 					deltaPoints,
-					store
+					store,
+					live
 				);
 				if (!option) {
 					throw new BetError('INVALID_TARGET', 'That target is not on today’s ladder.', {

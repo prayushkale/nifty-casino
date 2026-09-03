@@ -57,7 +57,7 @@ import {
 	type LadderOption,
 	type LadderUnderlying
 } from '$lib/config/ladder';
-import { computeTier, payoutFor, type PayableTier } from '$lib/game/tier';
+import { computeTier, hitAccuracy, payoutFor, type PayableTier } from '$lib/game/tier';
 import { DbError, getStore, resetStoreForTests, type GameStore } from '$lib/server/db';
 import type { Bet, DailyPot, IndexClose, LedgerEntry, Profile } from '$lib/server/db/types';
 import { getLadderForDate, invalidateLadderCache, resolveLadderOption } from '$lib/server/ladder';
@@ -798,7 +798,16 @@ async function main(): Promise<number> {
 			failures.push(`I3 bet ${bet.id} was left unsettled`);
 			continue;
 		}
-		const expectedPayout = payoutFor(tier, bet.stake, bet.odds);
+		const u2 = bet.underlying as LadderUnderlying;
+		const acc2 =
+			tier === 'hit'
+				? hitAccuracy(
+						{ underlying: u2, targetKind: bet.targetKind, deltaPoints: bet.deltaPoints },
+						anchors[u2],
+						anchors[u2] + plans[u2].delta
+					)
+				: 1;
+		const expectedPayout = payoutFor(tier, bet.stake, bet.odds, acc2);
 		if (bet.payout !== expectedPayout) {
 			failures.push(
 				`I3 bet ${bet.id}: payout ${bet.payout} ≠ payoutFor(${tier}, ${bet.stake}, ${bet.odds}) = ${expectedPayout}`

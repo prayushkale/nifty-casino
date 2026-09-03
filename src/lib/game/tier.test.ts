@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { LADDER_CONFIG, LADDER_UNDERLYINGS, type LadderUnderlying } from '$lib/config/ladder';
-import { computeTier, payoutFor, signedTargetPoints, type TierBet } from './tier';
+import { computeTier, hitAccuracy, payoutFor, signedTargetPoints, type TierBet } from './tier';
 
 const PREV = 25_000;
 const CLOSES: Record<LadderUnderlying, number> = {
@@ -222,5 +222,27 @@ describe('payoutFor', () => {
 		expect(payoutFor('hit', Number.NaN, 6)).toBe(0);
 		expect(payoutFor('hit', Number.POSITIVE_INFINITY, 6)).toBe(0);
 		expect(payoutFor('flat', Number.NaN, 6)).toBe(0);
+	});
+});
+
+describe('hitAccuracy — the graded multiplier', () => {
+	const bet: TierBet = { underlying: 'nifty', targetKind: 'up', deltaPoints: 50 };
+	it('is 1 exactly on target and 0 at the tolerance edge', () => {
+		expect(hitAccuracy(bet, PREV, PREV + 50)).toBe(1);
+		expect(hitAccuracy(bet, PREV, PREV + 65)).toBe(0);
+		expect(hitAccuracy(bet, PREV, PREV + 35)).toBe(0);
+	});
+	it('decays linearly: halfway pays half', () => {
+		expect(hitAccuracy(bet, PREV, PREV + 57.5)).toBeCloseTo(0.5, 10);
+		expect(hitAccuracy(bet, PREV, PREV + 42.5)).toBeCloseTo(0.5, 10);
+	});
+	it('is 0 for a wrong direction or outside the band', () => {
+		expect(hitAccuracy(bet, PREV, PREV - 50)).toBe(0);
+		expect(hitAccuracy(bet, PREV, PREV + 66)).toBe(0);
+	});
+	it('grades the payout: exact pays full odds, edge pays nothing', () => {
+		expect(payoutFor('hit', 100, 28, 1)).toBe(2800);
+		expect(payoutFor('hit', 100, 28, 0.5)).toBe(1400);
+		expect(payoutFor('hit', 100, 28, 0)).toBe(0);
 	});
 });

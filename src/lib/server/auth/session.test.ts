@@ -87,6 +87,32 @@ describe('resolveIdentity — Supabase configured', () => {
 		expect(identity).toEqual({ userId: 'u-unknown', handle: null, source: 'supabase' });
 	});
 
+	it('shows the signup metadata handle instead of nothing while the row is missing', async () => {
+		// A trigger-less user is still authenticated; the header must render who
+		// they are rather than falling back to Log in / Sign up.
+		const { event } = fakeEvent('http://localhost:5173/');
+		const supabase = {
+			auth: {
+				getUser: async () => ({
+					data: {
+						user: {
+							id: 'u-norow',
+							email: 'priya@example.com',
+							user_metadata: { handle: 'priya_trades' }
+						}
+					},
+					error: null
+				})
+			}
+		} as unknown as SupabaseClient;
+		const identity = await resolveIdentity(event, {
+			store: store(),
+			env: CONFIGURED,
+			supabase
+		});
+		expect(identity).toEqual({ userId: 'u-norow', handle: 'priya_trades', source: 'supabase' });
+	});
+
 	it('stays anonymous when the session is invalid — anonymous is not an error', async () => {
 		const { event } = fakeEvent('http://localhost:5173/', { [DEV_COOKIE_NAME]: 'u-1' });
 		const identity = await resolveIdentity(event, {
