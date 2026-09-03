@@ -220,7 +220,7 @@
 	/>
 </svelte:head>
 
-<div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-24 pt-4 md:pb-10 lg:px-2 xl:px-4">
+<div class="flex w-full flex-col gap-5 px-3 pb-24 pt-4 md:px-4 md:pb-10 lg:px-5">
 	<!-- ── the day, and what the room has staked ───────────────────────────────── -->
 	{#if !state.session.settled && state.user}
 		<section
@@ -403,7 +403,7 @@
 				on:keydown={onKeydown}
 				tabindex="-1"
 			>
-				<div class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-4 overflow-auto">
+				<div class="flex w-full flex-1 flex-col gap-4 overflow-auto">
 					<div class="flex items-center justify-between">
 						<h2 class="text-sm font-semibold uppercase tracking-widest text-white">
 							{INDEX_LABELS[fullscreen]} — fullscreen

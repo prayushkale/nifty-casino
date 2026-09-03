@@ -28,7 +28,6 @@
 		ticksToChartPoints,
 		type CasPoint
 	} from '$lib/game/chart';
-	import { FixedGridlinePrimitive } from './gridlines';
 	import { theme } from '$lib/stores/theme';
 	import {
 		formatNC,
@@ -87,18 +86,6 @@
 		fullscreen: { on: boolean };
 	}>();
 
-	/**
-	 * Default y-axis gridline step per index. The user asked for Nifty's y-axis
-	 * lines 50 points apart, BankNifty 100, Sensex 150. lightweight-charts has no
-	 * exact-interval option (its engine only emits "nice" steps), so the horizontal
-	 * gridlines are drawn by `FixedGridlinePrimitive` at exactly these steps.
-	 */
-	const PRICE_TICK_STEP: Record<LadderUnderlying, number> = {
-		nifty: 50,
-		banknifty: 100,
-		sensex: 150
-	};
-
 	/** Chart height — a 3-across desktop card and a stacked mobile card share it. */
 	const HEIGHT = 220;
 	$: effectiveHeight = displayHeight ?? HEIGHT;
@@ -108,8 +95,6 @@
 	let container: HTMLDivElement | null = null;
 	let chart: IChartApi | null = null;
 	let series: ISeriesApi<'Line'> | null = null;
-	/** The fixed-spacing gridline primitive, so a theme flip can recolor it. */
-	let gridlinePrimitive: FixedGridlinePrimitive | null = null;
 	/** Price lines we own, so a change in the bet set removes exactly the stale ones. */
 	let priceLines: { key: string; line: IPriceLine }[] = [];
 	/** Set once the chart exists — flips the placeholder off. */
@@ -388,19 +373,11 @@
 			height: effectiveHeight,
 			layout: {
 				background: { type: ColorType.Solid, color: palette.background },
-				textColor: palette.text,
-				fontSize: 11,
-				fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace'
+				textColor: palette.text
 			},
 			grid: {
 				vertLines: { color: palette.grid },
-				// The primitive draws the horizontal (price) gridlines at an exact
-				// per-index step; hide the engine's fixed-"nice"-step ones so they
-				// never double up with a different spacing.
-				horzLines: {
-					color: palette.grid,
-					visible: false
-				}
+				horzLines: { color: palette.grid }
 			},
 			rightPriceScale: {
 				visible: true,
@@ -443,9 +420,6 @@
 		});
 		series.setData([]);
 
-		gridlinePrimitive = new FixedGridlinePrimitive(PRICE_TICK_STEP[underlying], palette.grid);
-		series.attachPrimitive(gridlinePrimitive);
-
 		chart.subscribeCrosshairMove((param) => {
 			const bar = param.seriesData.get(series as ISeriesApi<'Line'>) as
 				| { value?: number }
@@ -466,7 +440,6 @@
 			chart?.remove();
 			chart = null;
 			series = null;
-			gridlinePrimitive = null;
 			priceLines = [];
 			ready = false;
 			crosshair = null;
@@ -507,7 +480,6 @@
 				// eslint-disable-next-line no-empty
 			} catch {}
 		}
-		gridlinePrimitive?.setColor(palette.grid);
 	}
 
 	$: if (chart && series && centeringProvider) {
