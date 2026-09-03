@@ -34,7 +34,6 @@
 	$: potential = payoutFor('hit', stake, odds);
 
 	const arrow = (kind: 'up' | 'down'): string => (kind === 'up' ? '▲' : '▼');
-	const dirWord = (kind: 'up' | 'down'): string => (kind === 'up' ? 'above' : 'below');
 	const level = (n: number): string => formatNC(Math.round(n));
 
 	function onKeydown(event: KeyboardEvent): void {

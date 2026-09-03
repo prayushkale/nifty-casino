@@ -383,3 +383,77 @@ describe('pollOnce — failure tolerance', () => {
 		expect(await deps.store.closes.getIndexCloses(DAY)).toHaveLength(0);
 	});
 });
+
+describe('pollOnce — the 15:15:01 LTP anchor', () => {
+	const baseDeps = () => ({
+		store: new MemoryStore(),
+		hot: new CasStore(),
+		log: { info: vi.fn(), warn: vi.fn() }
+	});
+
+	it('writes source=ltp_anchor rows on the first poll at/after 15:15:01', async () => {
+		const deps = baseDeps();
+		const result = await pollOnce(
+			{
+				...deps,
+				fetchNse: async () => buildNseIndexDataResponse(),
+				fetchBse: async () => [buildBseSensexRow()],
+				env: {}
+			},
+			new Date(istAt(DAY, 15, 15, 1))
+		);
+		const rows = await deps.store.closes.getIndexCloses(DAY);
+		const byUnderlying = new Map(rows.map((r) => [r.underlying, r]));
+		expect(byUnderlying.get('nifty')).toMatchObject({ close: 24630.2, source: 'ltp_anchor' });
+		expect(byUnderlying.get('banknifty')).toMatchObject({ close: 56210.4, source: 'ltp_anchor' });
+		expect(byUnderlying.get('sensex')).toMatchObject({ close: 78831.32, source: 'ltp_anchor' });
+		// The CAS ticks still flow as usual on the same poll.
+		expect(result.polled).toBe(3);
+	});
+
+	it('does not touch index_closes before 15:15:01', async () => {
+		const deps = baseDeps();
+		await pollOnce(
+			{
+				...deps,
+				fetchNse: async () => buildNseIndexDataResponse(),
+				fetchBse: async () => [buildBseSensexRow()],
+				env: {}
+			},
+			new Date(istAt(DAY, 15, 15, 0))
+		);
+		// Only the live_approx prev-close seeds, no LTP anchor row.
+		const rows = await deps.store.closes.getIndexCloses(DAY);
+		expect(rows.find((r) => r.source === 'ltp_anchor')).toBeUndefined();
+	});
+
+	it('attempts the anchor exactly once per day, even across polls', async () => {
+		const deps = baseDeps();
+		const anchors = new Map<string, DayAnchorBook>();
+		const pollAt = (ms: number, feedWorks: boolean): Promise<unknown> =>
+			pollOnce(
+				{
+					...deps,
+					anchors,
+					fetchNse: feedWorks
+						? async () => buildNseIndexDataResponse()
+						: async () => {
+								throw new Error('blocked');
+							},
+					fetchBse: feedWorks
+						? async () => [buildBseSensexRow()]
+						: async () => {
+								throw new Error('blocked');
+							},
+					env: {}
+				},
+				new Date(ms)
+			);
+		await pollAt(istAt(DAY, 15, 15, 1), true);
+		// Simulate the feed dying after the anchor: a second poll must not retry.
+		await pollAt(istAt(DAY, 15, 15, 5), false);
+		const rows = await deps.store.closes.getIndexCloses(DAY);
+		expect(rows.filter((r) => r.source === 'ltp_anchor')).toHaveLength(3);
+		expect(deps.log.warn.mock.calls.some((c) => String(c[0]).includes('ltp anchor'))).toBe(false);
+	});
+});

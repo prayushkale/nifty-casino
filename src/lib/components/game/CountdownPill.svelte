@@ -47,20 +47,20 @@
 		class="inline-flex items-center gap-1.5 rounded-full border bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-400"
 	>
 		<span aria-hidden="true">🏁</span>
-		next window 15:00 IST
+		next window 15:15 IST
 	</span>
 {:else if phase === 'closed-weekend'}
 	<span
 		class="inline-flex items-center gap-1.5 rounded-full border bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-400"
 	>
 		<span aria-hidden="true">🌙</span>
-		back {nextDay} 15:00 IST
+		back {nextDay} 15:15 IST
 	</span>
 {:else}
 	<span
 		class="inline-flex items-center gap-1.5 rounded-full border bg-zinc-50 px-3 py-1 text-xs font-medium text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-400"
 	>
 		<span aria-hidden="true">⏳</span>
-		bets open 15:00 IST
+		bets open 15:15 IST
 	</span>
 {/if}

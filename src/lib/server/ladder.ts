@@ -15,15 +15,17 @@
  *    — a tampered `odds` field would be a money printer (T7 service, PLAN §5 T7
  *    step 2).
  *
- * Anchor semantics, because `index_closes` carries two meanings under one roof:
+ * Anchor semantics, because `index_closes` carries three meanings under one roof:
+ *   source = 'ltp_anchor'  → `close` is TODAY's last traded price at 15:15:01 IST —
+ *                            the game's reference price, frozen when the spot market
+ *                            stopped. It outranks every walk-back row.
  *   source = 'official'    → `close` is that day's own close (written ~15:43 by T9)
  *   source = 'live_approx' → `close` is the PREVIOUS day's close (the poller's
- *                            anchor write for that day, PLAN §2 "prevClose")
- * Both are "the previous day's close" from the ladder's point of view, so the
- * search prefers the nearest `official` row and falls back to the nearest
- * `live_approx` row (today's own included). A ladder built before any official
- * close exists — the first day of a fresh deployment, or 15:00 before the
- * 15:13:30 poll — still works off the feed's prevClose.
+ *                            fallback write, PLAN §2 "prevClose")
+ * The search prefers today's `ltp_anchor` row, then the nearest `official` row,
+ * then the nearest `live_approx` row. A ladder built before any anchor exists —
+ * the first day of a fresh deployment — still resolves via the live fallbacks in
+ * {@link getLadderForDateWithLiveFallback}.
  */
 import {
 	generateLadderOptions,
@@ -33,6 +35,7 @@ import {
 	type LadderTargetKind,
 	type LadderUnderlying
 } from '$lib/config/ladder';
+import { ensureLtpAnchors, fetchLiveLtp, isLtpAnchorDue, readLtpAnchors } from '$lib/server/ltp';
 import { fillAnchorsFromLive, type LiveCloseDeps } from '$lib/server/live-closes';
 import { isWeekend, shiftIstDate } from '$lib/time/ist';
 import { getStore, type GameStore } from '$lib/server/db';
@@ -104,19 +107,28 @@ async function loadCloseIndex(store: GameStore, tradeDate: string): Promise<Clos
 }
 
 /**
- * The anchor for one index: the nearest `official` close in the walk-back window,
- * else the nearest `live_approx` row (today's own feed-carried prevClose is the
- * first fallback), else null — "no anchor, no bets on this index today".
+ * The anchor for one index, in priority order:
+ *
+ *   1. TODAY's `ltp_anchor` row — the last traded price at 15:15:01 IST, frozen
+ *      when the spot market stopped. This is THE game's reference price for the
+ *      day, so the moment it exists it beats every walk-back row.
+ *   2. the nearest `official` close from a previous day,
+ *   3. the nearest `live_approx` row (today's own feed-carried prevClose) —
+ *      the poller's fallback for the rare day the LTP capture failed.
  */
 function pickAnchor(
 	index: CloseIndex,
 	tradeDate: string,
 	underlying: LadderUnderlying
 ): number | null {
-	// Today's own row is the poller's live prevClose, and only ever a fallback. Once
-	// the day has an OFFICIAL close of its own it is a close, not an anchor — using
-	// it would measure every move against zero and refund the whole day.
 	const todayRow = index.get(tradeDate)?.get(underlying as Underlying) ?? null;
+
+	// The 15:15:01 LTP anchor IS the day's reference price — it wins outright.
+	if (todayRow?.source === 'ltp_anchor') return usableClose(todayRow);
+
+	// Today's own non-LTP row is only ever a fallback. Once the day has an OFFICIAL
+	// close of its own it is a close, not an anchor — using it would measure every
+	// move against zero and refund the whole day.
 	let fallback: IndexClose | null = todayRow?.source === 'official' ? null : todayRow;
 
 	for (const [date, byUnderlying] of index) {
@@ -184,27 +196,75 @@ export function invalidateLadderCache(): void {
 }
 
 /**
- * The day's ladder with the live previous-close fallback.
+ * The day's ladder with the live fallback.
  *
  * `getLadderForDate` is DB-only by design (pure, cacheable, hermetic in tests).
- * This wrapper layers the best-effort live feed over it: any index whose DB
- * anchor is null is re-anchored on the last closing price the NSE/BSE feeds
- * carry right now, and the options are regenerated from the merged anchors —
- * so a logged-in player sees bettable ladders from 15:00 even when the
- * poller's `live_approx` anchor row has not landed yet.
+ * This wrapper layers the best-effort live fetch over it for any index whose DB
+ * anchor is still null:
  *
- * The merged ladder is NOT written to the DB cache: the DB row, once the
- * poller writes it, carries the same previous-day close, so the two agree and
- * there is nothing to reconcile at settlement. `liveDeps` injects the fetchers
- * (tests) — omit it in production to hit the real feeds.
+ *  • at/after 15:15:01 IST the missing anchor is the frozen last traded price —
+ *    fetched and PERSISTED (`source = 'ltp_anchor'`) right here, so the first
+ *    request that notices wins and every later read finds it in the DB (see
+ *    `$lib/server/ltp`);
+ *  • before 15:15:01 it falls back to the last closing price the feeds carry —
+ *    a preview ladder only, since the real anchor is not set yet and bets are
+ *    not open.
+ *
+ * `liveDeps` injects the fetchers (tests) — omit it in production to hit the real
+ * feeds, or pass `false` for the DB-only ladder (hermetic tests). `now` is
+ * injectable for the same reason.
  */
 export async function getLadderForDateWithLiveFallback(
 	store: GameStore,
 	tradeDate: string,
-	liveDeps: LiveCloseDeps | false = {}
+	liveDeps: LiveCloseDeps | false = {},
+	now: Date = new Date()
 ): Promise<LadderForDate> {
+	if (liveDeps === false) return getLadderForDate(store, tradeDate);
+
+	if (isLtpAnchorDue(now)) {
+		// Past 15:15:01 the LTP is the anchor — and it outranks whatever the process
+		// cache holds, which may have been built BEFORE 15:15:01 from prev-close
+		// rows and must never outlive the anchor landing.
+		const anchored = await readLtpAnchors(store, tradeDate);
+		const allAnchored = LADDER_UNDERLYINGS.every((u) => anchored[u] !== null);
+		if (allAnchored) {
+			// Every index has its LTP anchor in the DB — no upstream fetch may happen.
+			// The only danger is a stale cache entry from before the anchor landed, so
+			// re-resolve unless the cache already agrees with the rows.
+			const cached = await getLadderForDate(store, tradeDate);
+			const cacheAgrees = LADDER_UNDERLYINGS.every(
+				(u) => cached.anchors[u] !== null && cached.anchors[u] === anchored[u]?.value
+			);
+			if (cacheAgrees) return cached;
+			invalidateLadderCache();
+			const reloaded = await getLadderForDate(store, tradeDate);
+			if (
+				reloaded.anchors.nifty !== null &&
+				reloaded.anchors.banknifty !== null &&
+				reloaded.anchors.sensex !== null
+			) {
+				return reloaded;
+			}
+		} else {
+			// Missing rows: fetch + persist (first caller wins), then re-resolve so the
+			// ladder and everything downstream read the same DB rows.
+			await ensureLtpAnchors(store, tradeDate, now, () => fetchLiveLtp(liveDeps));
+			invalidateLadderCache();
+			const reloaded = await getLadderForDate(store, tradeDate);
+			if (
+				reloaded.anchors.nifty !== null &&
+				reloaded.anchors.banknifty !== null &&
+				reloaded.anchors.sensex !== null
+			) {
+				return reloaded;
+			}
+		}
+		// An index the LTP could not price degrades to the prev-close preview below
+		// rather than vanishing — it cannot be bet anyway while its anchor is missing.
+	}
+
 	const ladder = await getLadderForDate(store, tradeDate);
-	if (liveDeps === false) return ladder;
 	if (
 		ladder.anchors.nifty !== null &&
 		ladder.anchors.banknifty !== null &&
@@ -242,12 +302,13 @@ export async function resolveLadderOption(
 	targetKind: LadderTargetKind,
 	deltaPoints: number,
 	store: GameStore = getStore(),
-	live: LiveCloseDeps | false = false
+	live: LiveCloseDeps | false = false,
+	now: Date = new Date()
 ): Promise<LadderOption | null> {
 	const ladder =
 		live === false
 			? await getLadderForDate(store, tradeDate)
-			: await getLadderForDateWithLiveFallback(store, tradeDate, live);
+			: await getLadderForDateWithLiveFallback(store, tradeDate, live, now);
 	return (
 		ladder.options.find(
 			(option) =>

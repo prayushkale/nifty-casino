@@ -198,6 +198,98 @@ export function extractNseMarketStatusNiftyTick(
 }
 
 // ---------------------------------------------------------------------------
+// LTP — last traded price (the pre-auction display + the 15:15 betting anchor)
+// ---------------------------------------------------------------------------
+
+/**
+ * One normalized LTP observation. Same display shape as `CasTickPayload` minus
+ * the indicatives: `value` is the LAST TRADED price of the regular session (NSE
+ * E1 `last`, BSE `ltp`), and `changePts`/`changePct` are measured against the
+ * previous day's close. Unlike the CAS ticks, the LTP is available all day — it
+ * is what a visitor sees on page load and the price the 15:15:01 anchor freezes.
+ */
+export type LtpQuote = {
+	underlying: Underlying;
+	value: number;
+	changePts: number;
+	changePct: number;
+	/** Previous day's official close, or null when the feed did not carry one. */
+	prevClose: number | null;
+	ts: number;
+	source: CasSource;
+};
+
+/** Change vs a positive prevClose, or zeros when no reference was carried. */
+function changeAgainst(
+	value: number,
+	prevClose: number | null
+): { changePts: number; changePct: number } {
+	if (prevClose === null || !(prevClose > 0)) return { changePts: 0, changePct: 0 };
+	const changePts = Math.round((value - prevClose) * 100) / 100;
+	return { changePts, changePct: Math.round((changePts / prevClose) * 10_000) / 100 };
+}
+
+/**
+ * Extract the normalized LTP for one NSE index from the RAW E1 response. The
+ * `last` field publishes all day (unlike `indicativeClose`, which is 0 outside
+ * the CAS window), so this works at any hour. Returns null when the row is
+ * missing or `last` is absent/zero — never a fabricated price.
+ */
+export function extractNseLtp(
+	raw: unknown,
+	underlying: Underlying,
+	ts: number = Date.now()
+): LtpQuote | null {
+	const indexName = NSE_INDEX_NAME_BY_UNDERLYING[underlying];
+	if (!indexName) return null; // SENSEX is a BSE index — not in the E1 feed
+	const row = asRowArray(raw).find((r) => r.indexName === indexName);
+	if (!row) return null;
+	const value = positiveOrNull(row.last);
+	if (value === null) return null;
+	const prevClose = positiveOrNull(row.previousClose);
+	const change = changeAgainst(value, prevClose);
+	return { underlying, value, ...change, prevClose, ts, source: 'nse' };
+}
+
+/**
+ * Extract the normalized SENSEX LTP from the RAW BSE GetSensexDatanew response
+ * (`ltp`, which — unlike `iclsprice` — carries a real price all day).
+ */
+export function extractBseLtp(raw: unknown, ts: number = Date.now()): LtpQuote | null {
+	const rows = Array.isArray(raw) ? raw.filter(isRecord) : [];
+	const row = rows.find((r) => r.indxnm === BSE_SENSEX_INDEX_NAME);
+	if (!row) return null;
+	const value = bseNum(row.ltp as string | number | null | undefined);
+	if (!(value > 0)) return null;
+	const prevClose = positiveOrNull(row.Prev_Close);
+	// BSE carries its own signed point change (`chg`); fall back to arithmetic.
+	const carried = bseNum(row.chg as string | number | null | undefined);
+	const changePts = carried !== 0 ? carried : changeAgainst(value, prevClose).changePts;
+	const changePct =
+		bseNum(row.perchg as string | number | null | undefined) !== 0
+			? bseNum(row.perchg as string | number | null | undefined)
+			: changeAgainst(value, prevClose).changePct;
+	return { underlying: 'sensex', value, changePts, changePct, prevClose, ts, source: 'bse' };
+}
+
+/** Both feeds at once, stamped with one instant. Either side may fail to null. */
+export function extractLtpQuotes(
+	nseRaw: unknown,
+	bseRaw: unknown,
+	ts: number = Date.now()
+): {
+	nifty: LtpQuote | null;
+	banknifty: LtpQuote | null;
+	sensex: LtpQuote | null;
+} {
+	return {
+		nifty: extractNseLtp(nseRaw, 'nifty', ts),
+		banknifty: extractNseLtp(nseRaw, 'banknifty', ts),
+		sensex: extractBseLtp(bseRaw, ts)
+	};
+}
+
+// ---------------------------------------------------------------------------
 // GetSensexDatanew — BSE SENSEX
 // ---------------------------------------------------------------------------
 

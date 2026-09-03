@@ -103,7 +103,7 @@ beforeEach(async () => {
 
 describe('placeBet', () => {
 	it('prices the bet off the ladder and freezes target and odds', async () => {
-		const bet = await placeBet(U1, nifty(), { now: at(15, 5), store });
+		const bet = await placeBet(U1, nifty(), { now: at(15, 16), store });
 
 		expect(bet).toMatchObject({
 			underlying: 'nifty',
@@ -128,17 +128,17 @@ describe('placeBet', () => {
 			const bet = await placeBet(
 				U1,
 				{ underlying, targetKind, deltaPoints, stake: 10 },
-				{ now: at(15, 5), store }
+				{ now: at(15, 16), store }
 			);
 			expect(bet.odds, `${underlying} ±${deltaPoints}`).toBe(odds);
 		}
 		await expectConsistent(store);
 	});
 
-	it('accepts the boundary instants: 15:00:00 opens, 15:20:00 is the last millisecond', async () => {
-		await placeBet(U1, nifty({ stake: 10 }), { now: at(15, 0, 0), store });
+	it('accepts the boundary instants: 15:15:00 opens, 15:20:00 is the last millisecond', async () => {
+		await placeBet(U1, nifty({ stake: 10 }), { now: at(15, 15, 0), store });
 		await expectCode(
-			placeBet(U1, nifty({ underlying: 'sensex' }), { now: at(14, 59, 59), store }),
+			placeBet(U1, nifty({ underlying: 'sensex' }), { now: at(15, 14, 59), store }),
 			'WINDOW_NOT_OPEN'
 		);
 		// BANKNIFTY's smallest step is 100, not 50 (PLAN §0.1).
@@ -157,7 +157,7 @@ describe('placeBet', () => {
 
 	it('refuses a weekend as MARKET_CLOSED, even inside the window', async () => {
 		await expectCode(
-			placeBet(U1, nifty(), { now: new Date(istAt(SATURDAY, 15, 10, 0)), store }),
+			placeBet(U1, nifty(), { now: new Date(istAt(SATURDAY, 15, 18, 0)), store }),
 			'MARKET_CLOSED'
 		);
 		await expectConsistent(store);
@@ -165,20 +165,20 @@ describe('placeBet', () => {
 
 	it('refuses a target that is not on today’s ladder as INVALID_TARGET', async () => {
 		await expectCode(
-			placeBet(U1, nifty({ deltaPoints: 75 }), { now: at(15, 5), store }),
+			placeBet(U1, nifty({ deltaPoints: 75 }), { now: at(15, 16), store }),
 			'INVALID_TARGET'
 		);
 		await expectCode(
-			placeBet(U1, nifty({ deltaPoints: 300 }), { now: at(15, 5), store }),
+			placeBet(U1, nifty({ deltaPoints: 300 }), { now: at(15, 16), store }),
 			'INVALID_TARGET'
 		);
 		// SENSEX has no 300 step by design (PLAN §0.1).
 		await expectCode(
-			placeBet(U1, nifty({ underlying: 'sensex', deltaPoints: 300 }), { now: at(15, 5), store }),
+			placeBet(U1, nifty({ underlying: 'sensex', deltaPoints: 300 }), { now: at(15, 16), store }),
 			'INVALID_TARGET'
 		);
 		await expectCode(
-			placeBet(U1, nifty({ targetKind: 'sideways' }), { now: at(15, 5), store }),
+			placeBet(U1, nifty({ targetKind: 'sideways' }), { now: at(15, 16), store }),
 			'INVALID_TARGET_KIND'
 		);
 		await expectConsistent(store);
@@ -198,7 +198,7 @@ describe('placeBet', () => {
 			[nifty({ targetKind: 'flat' }), 'INVALID_TARGET_KIND']
 		];
 		for (const [body, code] of cases) {
-			await expectCode(placeBet(U1, body, { now: at(15, 5), store }), code);
+			await expectCode(placeBet(U1, body, { now: at(15, 16), store }), code);
 		}
 
 		expect((await store.profiles.getProfile(U1))?.balance).toBe(SIGNUP_BONUS);
@@ -208,7 +208,7 @@ describe('placeBet', () => {
 
 	it('refuses a stake the wallet cannot cover, and leaves nothing behind', async () => {
 		const err = await expectCode(
-			placeBet(U1, nifty({ stake: 1001 }), { now: at(15, 5), store }),
+			placeBet(U1, nifty({ stake: 1001 }), { now: at(15, 16), store }),
 			'INSUFFICIENT_BALANCE'
 		);
 		expect(err.details).toMatchObject({ required: 1001, available: 1000 });
@@ -218,9 +218,9 @@ describe('placeBet', () => {
 	});
 
 	it('answers a double-submit with BET_EXISTS and the existing bet id, counted once', async () => {
-		const first = await placeBet(U1, nifty(), { now: at(15, 5), store });
+		const first = await placeBet(U1, nifty(), { now: at(15, 16), store });
 		const err = await expectCode(
-			placeBet(U1, nifty({ stake: 50 }), { now: at(15, 6), store }),
+			placeBet(U1, nifty({ stake: 50 }), { now: at(15, 17), store }),
 			'BET_EXISTS'
 		);
 		expect(err.details.betId).toBe(first.id);
@@ -235,19 +235,19 @@ describe('placeBet', () => {
 	it('refuses a bet once the session is no longer open', async () => {
 		const session = await store.sessions.ensureSession(THURSDAY, istAt(THURSDAY, 15, 20));
 		await store.sessions.setSessionStatus(session.id, 'locked');
-		await expectCode(placeBet(U1, nifty(), { now: at(15, 5), store }), 'SESSION_CLOSED');
+		await expectCode(placeBet(U1, nifty(), { now: at(15, 16), store }), 'SESSION_CLOSED');
 		await expectConsistent(store);
 	});
 });
 
 describe('editBet', () => {
 	const placeNifty = async (stake = 100): Promise<string> =>
-		(await placeBet(U1, nifty({ stake }), { now: at(15, 5), store })).id;
+		(await placeBet(U1, nifty({ stake }), { now: at(15, 16), store })).id;
 
 	it('halves the stake: +50 back on balance, −50 in the pot, two ledger rows', async () => {
 		const id = await placeNifty(100);
 
-		const bet = await editBet(U1, id, { stake: 50 }, { now: at(15, 10), store });
+		const bet = await editBet(U1, id, { stake: 50 }, { now: at(15, 18), store });
 		expect(bet.stake).toBe(50);
 		expect(bet.id).toBeTruthy();
 		expect((await store.profiles.getProfile(U1))?.balance).toBe(1000 - 50);
@@ -275,7 +275,7 @@ describe('editBet', () => {
 			U1,
 			id,
 			{ targetKind: 'down', deltaPoints: 200 },
-			{ now: at(15, 10), store }
+			{ now: at(15, 18), store }
 		);
 
 		expect(bet.id).toBe(id);
@@ -287,7 +287,7 @@ describe('editBet', () => {
 
 	it('flows a same-value edit through the same ledger math (zero net movement)', async () => {
 		const id = await placeNifty(100);
-		await editBet(U1, id, { stake: 100 }, { now: at(15, 10), store });
+		await editBet(U1, id, { stake: 100 }, { now: at(15, 18), store });
 
 		expect((await store.profiles.getProfile(U1))?.balance).toBe(900);
 		expect(await store.ledger.getLedgerForUser(U1)).toHaveLength(3); // refund + re-stake
@@ -298,7 +298,7 @@ describe('editBet', () => {
 	it('refuses a bigger stake the wallet cannot cover, changing nothing', async () => {
 		const id = await placeNifty(100);
 		await expectCode(
-			editBet(U1, id, { stake: 2000 }, { now: at(15, 10), store }),
+			editBet(U1, id, { stake: 2000 }, { now: at(15, 18), store }),
 			'INSUFFICIENT_BALANCE'
 		);
 		expect((await store.profiles.getProfile(U1))?.balance).toBe(900);
@@ -310,10 +310,10 @@ describe('editBet', () => {
 	it('refuses a patch target that is not on the ladder, and a bad stake', async () => {
 		const id = await placeNifty(100);
 		await expectCode(
-			editBet(U1, id, { deltaPoints: 75 }, { now: at(15, 10), store }),
+			editBet(U1, id, { deltaPoints: 75 }, { now: at(15, 18), store }),
 			'INVALID_TARGET'
 		);
-		await expectCode(editBet(U1, id, { stake: 1 }, { now: at(15, 10), store }), 'INVALID_STAKE');
+		await expectCode(editBet(U1, id, { stake: 1 }, { now: at(15, 18), store }), 'INVALID_STAKE');
 		expect((await store.bets.getBetById(id))?.stake).toBe(100);
 		await expectConsistent(store);
 	});
@@ -327,19 +327,19 @@ describe('editBet', () => {
 
 		const session = await store.sessions.getSessionByDate(THURSDAY);
 		await store.sessions.setSessionStatus(session?.id ?? 0, 'locked');
-		await expectCode(editBet(U1, id, { stake: 50 }, { now: at(15, 10), store }), 'SESSION_CLOSED');
+		await expectCode(editBet(U1, id, { stake: 50 }, { now: at(15, 18), store }), 'SESSION_CLOSED');
 		await expectConsistent(store);
 	});
 
 	it('refuses another player’s bet as BET_NOT_FOUND (and a bet that never existed)', async () => {
 		const id = await placeNifty(100);
-		await expectCode(editBet(U2, id, { stake: 50 }, { now: at(15, 10), store }), 'BET_NOT_FOUND');
+		await expectCode(editBet(U2, id, { stake: 50 }, { now: at(15, 18), store }), 'BET_NOT_FOUND');
 		await expectCode(
 			editBet(
 				U1,
 				'00000000-0000-4000-8000-00000000nope',
 				{ stake: 50 },
-				{ now: at(15, 10), store }
+				{ now: at(15, 18), store }
 			),
 			'BET_NOT_FOUND'
 		);
@@ -350,23 +350,23 @@ describe('editBet', () => {
 	it('refuses to edit a bet that is already settled', async () => {
 		const id = await placeNifty(100);
 		await store.bets.setBetOutcome(id, 'miss', 0, istAt(THURSDAY, 15, 45));
-		await expectCode(editBet(U1, id, { stake: 50 }, { now: at(15, 10), store }), 'BET_SETTLED');
+		await expectCode(editBet(U1, id, { stake: 50 }, { now: at(15, 18), store }), 'BET_SETTLED');
 		await expectConsistent(store);
 	});
 });
 
 describe('cancelBet', () => {
 	const placeNifty = async (stake = 100): Promise<string> =>
-		(await placeBet(U1, nifty({ stake }), { now: at(15, 5), store })).id;
+		(await placeBet(U1, nifty({ stake }), { now: at(15, 16), store })).id;
 
 	it('refunds the full stake, deletes the row and reverses the counters', async () => {
 		const id = await placeNifty(100);
 		await placeBet(U1, nifty({ underlying: 'banknifty', stake: 40, deltaPoints: 200 }), {
-			now: at(15, 6),
+			now: at(15, 17),
 			store
 		});
 
-		const result = await cancelBet(U1, id, { now: at(15, 10), store });
+		const result = await cancelBet(U1, id, { now: at(15, 18), store });
 		expect(result).toEqual({ refunded: 100 });
 
 		expect(await store.bets.getBetById(id)).toBeNull();
@@ -385,7 +385,7 @@ describe('cancelBet', () => {
 
 	it('keeps the refund in the ledger — the audit trail outlives the row', async () => {
 		const id = await placeNifty(100);
-		await cancelBet(U1, id, { now: at(15, 10), store });
+		await cancelBet(U1, id, { now: at(15, 18), store });
 
 		const rows = await store.ledger.getLedgerForUser(U1);
 		expect(rows.map((row) => row.kind)).toEqual(['refund', 'bet_stake']);
@@ -395,9 +395,9 @@ describe('cancelBet', () => {
 
 	it('frees the index slot, so the same index can be bet again today', async () => {
 		const id = await placeNifty(100);
-		await cancelBet(U1, id, { now: at(15, 10), store });
+		await cancelBet(U1, id, { now: at(15, 18), store });
 
-		const again = await placeBet(U1, nifty({ targetKind: 'down' }), { now: at(15, 11), store });
+		const again = await placeBet(U1, nifty({ targetKind: 'down' }), { now: at(15, 19), store });
 		expect(again.id).not.toBe(id);
 		expect((await store.pots.getDailyPot(THURSDAY))?.totalStaked).toBe(100);
 		await expectConsistent(store);
@@ -413,41 +413,41 @@ describe('cancelBet', () => {
 
 	it('refuses an unknown bet, another player’s bet, and a second cancel', async () => {
 		const id = await placeNifty(100);
-		await expectCode(cancelBet(U2, id, { now: at(15, 10), store }), 'BET_NOT_FOUND');
+		await expectCode(cancelBet(U2, id, { now: at(15, 18), store }), 'BET_NOT_FOUND');
 		await expectCode(
-			cancelBet(U1, '00000000-0000-4000-8000-00000000nope', { now: at(15, 10), store }),
+			cancelBet(U1, '00000000-0000-4000-8000-00000000nope', { now: at(15, 18), store }),
 			'BET_NOT_FOUND'
 		);
-		await cancelBet(U1, id, { now: at(15, 10), store });
-		await expectCode(cancelBet(U1, id, { now: at(15, 10), store }), 'BET_NOT_FOUND');
+		await cancelBet(U1, id, { now: at(15, 18), store });
+		await expectCode(cancelBet(U1, id, { now: at(15, 18), store }), 'BET_NOT_FOUND');
 		await expectConsistent(store);
 	});
 });
 
 describe('a whole betting day', () => {
 	it('stays counter-consistent through place, edit, cancel and a second player', async () => {
-		const a = await placeBet(U1, nifty(), { now: at(15, 1), store });
+		const a = await placeBet(U1, nifty(), { now: at(15, 15, 1), store });
 		await placeBet(U1, nifty({ underlying: 'banknifty', deltaPoints: 200, stake: 40 }), {
-			now: at(15, 2),
+			now: at(15, 15, 30),
 			store
 		});
 		const c = await placeBet(U2, nifty({ underlying: 'sensex', deltaPoints: 250, stake: 60 }), {
-			now: at(15, 3),
+			now: at(15, 16),
 			store
 		});
-		await editBet(U1, a.id, { stake: 250 }, { now: at(15, 4), store });
+		await editBet(U1, a.id, { stake: 250 }, { now: at(15, 16, 30), store });
 		// A third leg for U1 on a free index, then cancelled: the counters must unwind.
 		const scratch = await placeBet(
 			U1,
 			nifty({ underlying: 'sensex', deltaPoints: 250, stake: 30 }),
 			{
-				now: at(15, 5),
+				now: at(15, 16),
 				store
 			}
 		);
-		await cancelBet(U1, scratch.id, { now: at(15, 6), store });
-		await cancelBet(U2, c.id, { now: at(15, 7), store });
-		await editBet(U1, a.id, { deltaPoints: 100 }, { now: at(15, 8), store });
+		await cancelBet(U1, scratch.id, { now: at(15, 17), store });
+		await cancelBet(U2, c.id, { now: at(15, 18), store });
+		await editBet(U1, a.id, { deltaPoints: 100 }, { now: at(15, 18, 30), store });
 
 		await expectConsistent(store);
 		expect((await store.pots.getDailyPot(THURSDAY))?.playersCount).toBe(1);

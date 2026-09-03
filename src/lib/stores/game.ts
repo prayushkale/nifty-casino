@@ -65,8 +65,8 @@ export const INDEX_SHORT: Readonly<Record<LadderUnderlying, string>> = {
 /**
  * Where the day is, from the player's chair.
  *
- *   pre             before 15:00 IST      — read-only, "bets open 15:00 IST"
- *   open            15:00:00 → 15:20:00   — the only phase that accepts bets
+ *   pre             before 15:15 IST     — read-only, "bets open 15:15 IST"
+ *   open            15:15:00 → 15:20:00  — the only phase that accepts bets
  *   locked          after the cutoff      — read-only, awaiting the official close
  *   settled         the day is paid out   — read-only, results visible
  *   closed-weekend  Saturday/Sunday IST   — read-only, back next trading day
@@ -80,8 +80,8 @@ const toMs = (now: number | Date): number => (now instanceof Date ? now.getTime(
  *
  * Precedence is the order the answers can coexist in: `settled` first (a settled
  * day stays settled however late it is), then the weekend (a Saturday morning
- * must say "market closed", not "bets open at 15:00"), then the clock. The
- * boundaries are inclusive exactly where the server's are — 15:00:00.000 opens the
+ * must say "market closed", not "bets open at 15:15"), then the clock. The
+ * boundaries are inclusive exactly where the server's are — 15:15:00.000 opens the
  * window and 15:20:00.000 is STILL open, because the money path accepts a bet
  * while `now <= session.cutoffAt`; a form that locked a tick early would refuse a
  * bet the server would have taken. One millisecond later it is `locked`.
@@ -144,7 +144,7 @@ const DAY_NAMES: readonly string[] = [
 
 /**
  * The next day the market opens, as a weekday name — what the weekend banner and
- * the countdown pill promise ("market closed — back Monday 15:00"). Skips
+ * the countdown pill promise ("market closed — back Monday 15:15"). Skips
  * weekends only: a mid-week holiday is the data layer's business, not something a
  * calendar walk can know.
  */
@@ -159,13 +159,13 @@ export function nextTradingDayName(dateStr: string): string {
 }
 
 /**
- * The next 15:00:00 IST opening, however far away it is.
+ * The next 15:15:00 IST opening, however far away it is.
  *
  * T13's countdown-to-next-session: the PhaseBanner's `pre` and `closed-weekend`
  * states need a live "opens in 4h 12m", and a live countdown needs a pure source
  * of truth that agrees with the phase machine above. It does — the same
  * `BETTING_START_HMS`, the same weekend rule, and the same strictness (`sec <
- * startSec` means 15:00:00.000 exactly is already OPEN, so it is never
+ * startSec` means 15:15:00.000 exactly is already OPEN, so it is never
  * "upcoming").
  *
  * Skips weekends only, exactly like `nextTradingDayName`: a mid-week market
@@ -174,7 +174,7 @@ export function nextTradingDayName(dateStr: string): string {
 export type NextWindowOpen = {
 	/** Milliseconds until the opening instant — always positive when returned. */
 	ms: number;
-	/** The day phrase to render before "at 15:00 IST": 'today' | 'tomorrow' | weekday. */
+	/** The day phrase to render before "at 15:15 IST": 'today' | 'tomorrow' | weekday. */
 	label: string;
 };
 
@@ -555,7 +555,7 @@ const BET_ERROR_COPY: Readonly<Record<string, string>> = {
 	INVALID_STAKE: `Stake must be a whole number from ${MIN_STAKE} to ${formatNC(MAX_STAKE)} NC.`,
 	INVALID_TARGET: 'That target is no longer on the ladder.',
 	MARKET_CLOSED: 'Markets are closed — back on the next trading day.',
-	WINDOW_NOT_OPEN: 'Betting opens at 15:00 IST.',
+	WINDOW_NOT_OPEN: 'Betting opens at 15:15 IST.',
 	CUTOFF_PASSED: 'The 15:20 cutoff has passed — bets are locked.',
 	SESSION_CLOSED: 'This session is no longer accepting bets.',
 	BET_EXISTS: 'You already have a bet on this index today — edit it instead.',

@@ -55,7 +55,7 @@ beforeEach(async () => {
 	});
 
 	vi.useFakeTimers({ toFake: ['Date'] });
-	vi.setSystemTime(new Date(istAt(THURSDAY, 15, 5, 0)));
+	vi.setSystemTime(new Date(istAt(THURSDAY, 15, 16, 0)));
 });
 
 afterEach(() => {
@@ -121,17 +121,17 @@ describe('POST /api/bets', () => {
 	});
 
 	it('maps the window, the market and the wallet to 409', async () => {
-		vi.setSystemTime(new Date(istAt(THURSDAY, 14, 59, 59)));
+		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 14, 59)));
 		expect(await post(nifty())).toMatchObject({ status: 409, body: { error: 'WINDOW_NOT_OPEN' } });
 
 		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 20, 1)));
 		expect(await post(nifty())).toMatchObject({ status: 409, body: { error: 'CUTOFF_PASSED' } });
 
-		vi.setSystemTime(new Date(istAt('2026-08-29', 15, 10, 0))); // Saturday
+		vi.setSystemTime(new Date(istAt('2026-08-29', 15, 18, 0))); // Saturday
 		expect(await post(nifty())).toMatchObject({ status: 409, body: { error: 'MARKET_CLOSED' } });
 
 		// Back inside the window, a stake the wallet cannot cover is still 409.
-		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 5, 0)));
+		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 16, 0)));
 		expect(await post(nifty({ stake: SIGNUP_BONUS + 1 }))).toMatchObject({
 			status: 409,
 			body: { error: 'INSUFFICIENT_BALANCE', required: SIGNUP_BONUS + 1, available: SIGNUP_BONUS }

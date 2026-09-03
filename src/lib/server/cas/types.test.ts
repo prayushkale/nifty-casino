@@ -3,8 +3,11 @@ import {
 	BSE_SENSEX_INDEX_NAME,
 	bseNum,
 	extractBseCasTick,
+	extractBseLtp,
+	extractLtpQuotes,
 	extractNseCasTick,
 	extractNseCasTicks,
+	extractNseLtp,
 	extractNseMarketStatusIndicative,
 	extractNseMarketStatusNiftyTick,
 	extractNseMarketStatusOk
@@ -226,5 +229,79 @@ describe('extractBseCasTick (GetSensexDatanew → normalized tick)', () => {
 
 	it('does not throw on rows of the wrong shape', () => {
 		expect(extractBseCasTick([null, 42, {}], TS)).toBeNull();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// LTP extractors — the all-day last-traded-price fields
+// ---------------------------------------------------------------------------
+
+describe('extractNseLtp (E1 `last` → normalized LTP)', () => {
+	it('extracts last/previousClose and derives the change', () => {
+		const quote = extractNseLtp(buildNseIndexDataResponse(), 'nifty', TS);
+		expect(quote).toEqual({
+			underlying: 'nifty',
+			value: 24630.2,
+			changePts: 44.05, // 24630.2 − 24586.15
+			changePct: 0.18,
+			prevClose: 24586.15,
+			ts: TS,
+			source: 'nse'
+		});
+	});
+
+	it('extracts BANKNIFTY by its index name', () => {
+		expect(extractNseLtp(buildNseIndexDataResponse(), 'banknifty', TS)?.value).toBe(56210.4);
+	});
+
+	it('returns null for SENSEX (a BSE index — never in the E1 feed)', () => {
+		expect(extractNseLtp(buildNseIndexDataResponse(), 'sensex', TS)).toBeNull();
+	});
+
+	it('returns null when the row is missing or `last` is absent/zero', () => {
+		expect(extractNseLtp({ data: [] }, 'nifty', TS)).toBeNull();
+		expect(
+			extractNseLtp(buildNseIndexDataResponse([buildNseIndexQuote({ last: 0 })]), 'nifty', TS)
+		).toBeNull();
+	});
+});
+
+describe('extractBseLtp (BSE `ltp` → normalized SENSEX LTP)', () => {
+	it('extracts ltp/chg/perchg with the carried change', () => {
+		const quote = extractBseLtp([buildBseSensexRow()], TS);
+		expect(quote).toEqual({
+			underlying: 'sensex',
+			value: 78831.32,
+			changePts: 250.32,
+			changePct: 0.32,
+			prevClose: 78581.0,
+			ts: TS,
+			source: 'bse'
+		});
+	});
+
+	it('falls back to arithmetic when BSE carries no change fields', () => {
+		const row = buildBseSensexRow({ chg: '0', perchg: '0' });
+		const quote = extractBseLtp([row], TS);
+		expect(quote?.changePts).toBeCloseTo(78831.32 - 78581.0, 2);
+	});
+
+	it('returns null outside the day (ltp is "-") or when the row is missing', () => {
+		expect(extractBseLtp([buildBseSensexRow({ ltp: '-' })], TS)).toBeNull();
+		expect(extractBseLtp([], TS)).toBeNull();
+	});
+});
+
+describe('extractLtpQuotes — both feeds, one instant', () => {
+	it('fills every underlying and leaves failures as null', () => {
+		const quotes = extractLtpQuotes(buildNseIndexDataResponse(), [buildBseSensexRow()], TS);
+		expect(quotes.nifty?.value).toBe(24630.2);
+		expect(quotes.banknifty?.value).toBe(56210.4);
+		expect(quotes.sensex?.value).toBe(78831.32);
+		expect(extractLtpQuotes(null, null, TS)).toEqual({
+			nifty: null,
+			banknifty: null,
+			sensex: null
+		});
 	});
 });

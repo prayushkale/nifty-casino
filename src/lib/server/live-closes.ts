@@ -2,7 +2,7 @@
  * Live previous-close fallback (server-only).
  *
  * The ladder's anchors come from `index_closes` (official → live_approx walk),
- * but on a fresh deploy — or between 15:00 (bets open) and the first CAS poll
+ * but on a fresh deploy — or before the 15:15:01 LTP anchor lands
  * (~15:13:30, when the poller writes its `live_approx` anchor) — the DB has no
  * anchor yet while the NSE/BSE feeds already carry `previousClose`/`Prev_Close`.
  * Without a fallback the cards read "No ladder … previous close has not landed
@@ -49,9 +49,9 @@ async function readNse(
 			? ((raw as Record<string, unknown>).data as unknown[])
 			: [];
 		const findPrev = (indexName: string): number | null => {
-			const row = rows.find(
-				(r) => (r as Record<string, unknown>)?.indexName === indexName
-			) as Record<string, unknown> | undefined;
+			const row = rows.find((r) => (r as Record<string, unknown>)?.indexName === indexName) as
+				| Record<string, unknown>
+				| undefined;
 			if (!row) return null;
 			return positiveOrNull(row.previousClose);
 		};
@@ -69,14 +69,16 @@ async function readNse(
 	}
 }
 
-async function readBse(deps: LiveCloseDeps, out: LivePrevCloses, needSensex: boolean): Promise<void> {
+async function readBse(
+	deps: LiveCloseDeps,
+	out: LivePrevCloses,
+	needSensex: boolean
+): Promise<void> {
 	if (!needSensex) return;
 	try {
 		const fetchBseSensexRows =
 			deps.fetchBseSensexRows ??
-			((await import('$lib/server/cas/bse-api')).fetchBseSensexRows as () => Promise<
-				unknown[]
-			>);
+			((await import('$lib/server/cas/bse-api')).fetchBseSensexRows as () => Promise<unknown[]>);
 		const rows = await fetchBseSensexRows();
 		const sensexRow = (rows as unknown[]).find(
 			(r) => (r as Record<string, unknown>)?.indxnm === 'BSE SENSEX'

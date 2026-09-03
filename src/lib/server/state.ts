@@ -12,7 +12,7 @@
  *
  * One `now` is captured at the top and used for EVERY time flag and for
  * `serverNow`. Three flags derived from three different `Date.now()` reads would
- * let a payload disagree with itself across the 15:00/15:13:30/15:20:00 seams;
+ * let a payload disagree with itself across the 15:15/15:20:00 seams;
  * one instant cannot. `serverNow` travels with the payload so the client can
  * drift-correct its countdown against the server's clock (PLAN §6 R3) instead
  * of trusting its own.
@@ -73,7 +73,7 @@ export type StateSession = {
 	status: SessionStatus | null;
 	/** 15:20:00 IST of the trade date, epoch ms. `null` when {@link exists} is false. */
 	cutoffAtMs: number | null;
-	/** 15:00:00–15:20:00 IST inclusive — bets are being accepted. */
+	/** 15:15:00–15:20:00 IST inclusive — bets are being accepted. */
 	bettingWindowOpen: boolean;
 	/** 15:13:30–15:42:00 IST inclusive — the auction is on and charts go live. */
 	auctionLive: boolean;

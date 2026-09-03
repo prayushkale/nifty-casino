@@ -217,7 +217,7 @@
 				</span>
 				<span
 					class="num text-xs font-semibold {changeUp ? 'text-up' : 'text-down'}"
-					title="Move from the previous close"
+					title="Move from the previous close (pre-auction) or the 15:15 anchor (in window)"
 				>
 					{changePts === null ? '' : changeUp ? '▲' : '▼'}
 					{changePts === null ? '—' : fmtSigned(changePts)}
@@ -228,8 +228,10 @@
 			>
 		</button>
 		<p class="mt-1 text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-600">
-			prev close
-			<span class="num text-zinc-700 dark:text-zinc-400"
+			anchor
+			<span
+				class="num text-zinc-700 dark:text-zinc-400"
+				title="The last traded price at 15:15 IST — every target is measured from it"
 				>{anchor === null ? '—' : formatNC(Math.round(anchor))}</span
 			>
 			{#if latestValue !== null && !openPhase}
@@ -249,7 +251,7 @@
 			<p
 				class="rounded-lg border bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-felt-700 dark:bg-felt-800/60 dark:text-zinc-400"
 			>
-				No ladder for {label} today — the previous close has not landed yet.
+				No ladder for {label} today — the anchor price has not landed yet.
 			</p>
 		{:else if !authed}
 			<!-- Read-only board for a stranger: the ladder is the product's shop window. -->
@@ -474,7 +476,7 @@
 					{#if pending}
 						Placing…
 					{:else if !openPhase}
-						{phase === 'pre' ? 'Bets open 15:00 IST' : 'Bets closed'}
+						{phase === 'pre' ? 'Bets open 15:15 IST' : 'Bets closed'}
 					{:else if !selected}
 						Pick a target
 					{:else if !stakeOk}

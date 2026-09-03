@@ -35,8 +35,8 @@
 	>
 		<span aria-hidden="true">⏳</span>
 		<span>
-			<strong class="font-semibold">Bets open at 15:00 IST.</strong>
-			<span class="text-zinc-400">The ladder is up — study it, place your calls from 15:00.</span>
+			<strong class="font-semibold">Bets open at 15:15 IST.</strong>
+			<span class="text-zinc-400">The ladder is up — study it, place your calls from 15:15.</span>
 		</span>
 		{#if next}
 			<span
@@ -70,7 +70,7 @@
 		<span aria-hidden="true">🏁</span>
 		<span>
 			<strong class="font-semibold">Settled — see results.</strong>
-			<span class="text-zinc-500">Today's calls are paid. The next window opens 15:00 IST.</span>
+			<span class="text-zinc-500">Today's calls are paid. The next window opens 15:15 IST.</span>
 		</span>
 	</div>
 {:else if phase === 'closed-weekend'}
@@ -80,7 +80,7 @@
 	>
 		<span aria-hidden="true">🌙</span>
 		<span>
-			<strong class="font-semibold">Market closed — back {nextDay} 15:00 IST.</strong>
+			<strong class="font-semibold">Market closed — back {nextDay} 15:15 IST.</strong>
 			<span class="text-zinc-500">No CAS on weekends, so there is nothing to call.</span>
 		</span>
 		{#if next}

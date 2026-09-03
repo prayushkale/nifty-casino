@@ -62,7 +62,7 @@
 		<h2 class="text-base font-semibold text-amber-700 dark:text-gold">1 · The day in 30 seconds</h2>
 		<ol class="mt-3 flex list-decimal flex-col gap-2 pl-5 leading-relaxed">
 			<li>
-				Between <strong>15:00 and 15:20 IST</strong> on a trading day, pick how each index will close
+				Between <strong>15:15 and 15:20 IST</strong> on a trading day, pick how each index will close
 				— NIFTY 50, BANKNIFTY, SENSEX. Any subset: one call per index, and you can edit or cancel free
 				until the 15:20 cutoff.
 			</li>

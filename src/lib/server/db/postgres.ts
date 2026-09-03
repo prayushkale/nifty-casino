@@ -825,6 +825,20 @@ function createRepos(sql: SqlClient): TxStore {
 				returning underlying`;
 			return rows.length > 0;
 		},
+		// The 15:15 LTP anchor: replaces a live_approx fallback row, never an official
+		// close — `where source = 'live_approx'` makes an official row (or a second
+		// LTP write) a silent no-op, which is what makes this idempotent.
+		upsertIndexLtpAnchor: async (close) => {
+			const rows = await sql`
+				insert into index_closes (trade_date, underlying, close, source)
+				values (${close.tradeDate}, ${close.underlying}, ${close.close}, 'ltp_anchor')
+				on conflict (trade_date, underlying) do update set
+					close = excluded.close,
+					source = excluded.source
+				where index_closes.source = 'live_approx'
+				returning underlying`;
+			return rows.length > 0;
+		},
 		getIndexCloses: async (tradeDate) => {
 			const rows =
 				await sql`select * from index_closes where trade_date = ${tradeDate} order by underlying asc`;

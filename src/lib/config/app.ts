@@ -7,11 +7,38 @@
 export const APP_TIMEZONE_OFFSET_MIN = 330;
 
 /**
- * Bet placement OPENS here, IST (PLAN §0: the participation window is
- * 15:00 → 15:20:00). Before this the day's session is not accepting bets.
- * The cutoff is {@link CUTOFF_HMS}; both ends are inclusive.
+ * Bet placement OPENS here, IST — 15:15:01, one second after the spot market's
+ * last print, because the LTP captured at {@link LTP_ANCHOR_HMS} is the anchor
+ * every rung is measured from. Bets before that instant would hang off an anchor
+ * that has not been set yet. The cutoff is {@link CUTOFF_HMS}.
  */
-export const BETTING_START_HMS = { h: 15, m: 0, s: 0 } as const;
+export const BETTING_START_HMS = { h: 15, m: 15, s: 0 } as const;
+
+/**
+ * The last-traded-price (LTP) display starts REFRESHING here, IST. Before 15:00
+ * a page load fetches the LTP once and it sits still; from 15:00 the client
+ * re-reads it every {@link LTP_REFRESH_MS}.
+ */
+export const LTP_REFRESH_START_HMS = { h: 15, m: 0, s: 0 } as const;
+
+/**
+ * The ONE final LTP load, IST. After this the spot market has stopped, the price
+ * is static, and the value captured here is persisted as the day's betting
+ * anchor (`index_closes.source = 'ltp_anchor'`) — the point every bet, target
+ * line and the post-15:20 cash chart is measured from. The cash (CAS) session
+ * itself begins at 15:20.
+ */
+export const LTP_ANCHOR_HMS = { h: 15, m: 15, s: 1 } as const;
+
+/** How often the client refreshes the LTP between 15:00 and 15:15:01 (ms). */
+export const LTP_REFRESH_MS = 30_000;
+
+/**
+ * Server-side LTP cache TTL (ms). The client cadence is {@link LTP_REFRESH_MS},
+ * but a hundred open tabs must still cost NSE one fetch per TTL — 20s keeps at
+ * most 3 upstream hits a minute no matter how many players are watching.
+ */
+export const LTP_SERVER_CACHE_MS = 20_000;
 
 /** Bet placement closes exactly here (inclusive up to this instant), IST. */
 export const CUTOFF_HMS = { h: 15, m: 20, s: 0 } as const;

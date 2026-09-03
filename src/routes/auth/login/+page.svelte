@@ -7,8 +7,11 @@
 	// Null ⇒ no Supabase project on this deployment, so the dev panel is what works.
 	const devMode = resolveSupabaseBrowserConfig() === null;
 
-	// /auth/confirm sends failed confirmations here as a readable banner.
+	// /auth/confirm sends failed confirmations here as a readable banner, and
+	// successful signup confirmations as `?verified=1` (the "Email verified"
+	// step of the flow: verify → see this banner → log in).
 	const banner = $page.url.searchParams.get('error') ?? '';
+	const verified = $page.url.searchParams.get('verified') === '1';
 
 	let email = '';
 	let password = '';
@@ -92,6 +95,12 @@
 </svelte:head>
 
 <AuthCard title="Back to the tables" subtitle="Your chips are where you left them.">
+	{#if verified}
+		<div class="nc-ok mb-4">
+			<strong class="font-semibold">✓ Email verified!</strong>
+			Your 1,000 NC signup bonus is already on the table — log in to claim your seat.
+		</div>
+	{/if}
 	{#if banner}
 		<p class="nc-alert mb-4">{banner}</p>
 	{/if}

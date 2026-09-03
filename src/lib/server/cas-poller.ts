@@ -25,10 +25,18 @@ import { istDateStr } from '$lib/time/ist';
 import { istDateForTick } from './cas/cas-series';
 import { fetchBseSensexRows } from './cas/bse-api';
 import { fetchIndexData } from './cas/nse-api';
-import { extractBseCasTick, extractNseCasTicks, type CasTickPayload } from './cas/types';
+import {
+	extractBseCasTick,
+	extractBseLtp,
+	extractNseCasTicks,
+	extractNseLtp,
+	type CasTickPayload,
+	type LtpQuote
+} from './cas/types';
 import { getCasStore, isAuctionWindowActive, type CasStore } from './cas-store';
 import { getStore, type GameStore } from './db';
 import type { CasTickRow, CloseSource, Underlying } from './db/types';
+import { isLtpAnchorDue, persistLtpAnchors } from './ltp';
 import { unrefTimer } from './sse';
 
 /** Where a close came from (re-declared here to keep the poller's writes readable). */
@@ -55,6 +63,8 @@ export type DayAnchorBook = {
 	official: Set<Underlying>;
 	/** Set once the day's `index_closes` row has been read (one query per day). */
 	officialLoaded: boolean;
+	/** True once the 15:15:01 LTP-anchor capture has been attempted for today. */
+	ltpAttempted?: boolean;
 };
 
 export type PollerDeps = {
@@ -141,6 +151,60 @@ export function needsAnchor(state: AnchorDayState, payload: CasTickPayload): boo
 // one poll
 // ---------------------------------------------------------------------------
 
+/** The per-day book for `tradeDate`, creating it when absent. */
+function dayBook(deps: PollerDeps, tradeDate: string): DayAnchorBook {
+	let book = deps.anchors?.get(tradeDate);
+	if (!book) {
+		book = { anchored: new Set(), official: new Set(), officialLoaded: false };
+		deps.anchors?.set(tradeDate, book);
+	}
+	return book;
+}
+
+/**
+ * The 15:15:01 LTP anchor, out of the raws a poll already holds.
+ *
+ * Exactly one attempt per (day): the first poll at/after 15:15:01 extracts the
+ * LTP, persists it as `source = 'ltp_anchor'` (first-wins, official protected),
+ * and marks the book — the spot market has stopped, so a retry could only read
+ * the same number anyway, and `ensureLtpAnchors` on the bet/API path still
+ * covers a failed feed.
+ */
+async function maybeAnchorLtp(
+	deps: PollerDeps,
+	store: GameStore,
+	nse: PromiseSettledResult<unknown>,
+	bse: PromiseSettledResult<unknown>,
+	now: Date,
+	log: Pick<Console, 'info' | 'warn'>
+): Promise<void> {
+	if (!isLtpAnchorDue(now)) return;
+	const tradeDate = istDateStr(now);
+	const book = dayBook(deps, tradeDate);
+	if (book.ltpAttempted) return;
+	book.ltpAttempted = true;
+
+	const quotes: Record<Underlying, LtpQuote | null> = {
+		nifty: nse.status === 'fulfilled' ? extractNseLtp(nse.value, 'nifty', now.getTime()) : null,
+		banknifty:
+			nse.status === 'fulfilled' ? extractNseLtp(nse.value, 'banknifty', now.getTime()) : null,
+		sensex: bse.status === 'fulfilled' ? extractBseLtp(bse.value, now.getTime()) : null
+	};
+	try {
+		const written = await persistLtpAnchors(store, tradeDate, quotes);
+		if (written.length > 0) {
+			const level = (u: Underlying): string =>
+				quotes[u] === null ? '—' : String(quotes[u]?.value.toFixed(2));
+			log.info(
+				`[cas-poller] ltp anchor for ${tradeDate}: ${written.join(', ')} — ` +
+					`nifty ${level('nifty')}, banknifty ${level('banknifty')}, sensex ${level('sensex')}`
+			);
+		}
+	} catch (err) {
+		warnThrottled(log, 'ltp-anchor', `[cas-poller] ltp anchor write failed: ${errorMessage(err)}`);
+	}
+}
+
 /**
  * One cycle: fetch both exchanges, normalize, ingest into the hot buffer, then
  * persist the archive + the prev-close anchor. Every failure path is a
@@ -171,6 +235,11 @@ export async function pollOnce(deps: PollerDeps = {}, now: Date = new Date()): P
 		warnThrottled(log, 'bse', `[cas-poller] BSE SENSEX failed: ${errorMessage(bse.reason)}`);
 	}
 
+	// The 15:15:01 LTP anchor comes out of the SAME raw payloads (E1's `last`, BSE's
+	// `ltp` — both publish all day), so no extra upstream call is needed. First poll
+	// at/after 15:15:01 wins; a later poll never re-attempts (see the day book).
+	await maybeAnchorLtp(deps, store, nse, bse, now, log);
+
 	if (payloads.length === 0) return { polled: 0, accepted: 0, persisted: 0, anchored: [] };
 
 	const { accepted } = hot.ingest(payloads, now);
@@ -191,9 +260,9 @@ export async function pollOnce(deps: PollerDeps = {}, now: Date = new Date()): P
 
 /**
  * Persist the previous-day anchor for any underlying whose first positive
- * `prevClose` of the day just arrived. This is the row the bet ladder (T8) and
- * settlement (T9) hang off, so it is written as early as the feed allows and
- * never overwrites an official close.
+ * `prevClose` of the day just arrived. This is the poller's live_approx fallback
+ * row — since the LTP anchor (`maybeAnchorLtp`) became the game's real anchor, it
+ * only matters when the 15:15:01 LTP capture failed. Never overwrites official.
  */
 async function anchorPrevCloses(
 	deps: PollerDeps,

@@ -469,6 +469,17 @@ export type CloseRepo = {
 		close: number;
 		source: CloseSource;
 	}): Promise<boolean>;
+	/**
+	 * Write the day's 15:15 last-traded-price anchor (`source = 'ltp_anchor'`).
+	 * Overwrites a `live_approx` row (the poller's earlier prev-close fallback on
+	 * the same primary key) but NEVER an `official` one, so a settled day is
+	 * untouchable. Returns whether the row now holds the LTP anchor.
+	 */
+	upsertIndexLtpAnchor(close: {
+		tradeDate: string;
+		underlying: Underlying;
+		close: number;
+	}): Promise<boolean>;
 	getIndexCloses(tradeDate: string): Promise<IndexClose[]>;
 	/** The previous trading day's official close — the anchor every bet ladder hangs off. */
 	getLatestCloseBefore(tradeDate: string, underlying: Underlying): Promise<IndexClose | null>;

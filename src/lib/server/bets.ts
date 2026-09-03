@@ -212,7 +212,7 @@ export function tradeDayFor(now: Date): { tradeDate: string; cutoffAtMs: number 
 	};
 }
 
-/** Where `now` sits in the 15:00:00–15:20:00 IST participation window. */
+/** Where `now` sits in the 15:15:00–15:20:00 IST participation window. */
 export function bettingWindowState(now: Date): 'open' | 'not-open' | 'cutoff-passed' {
 	if (isBetweenHMS(now, BETTING_START_HMS, CUTOFF_HMS)) return 'open';
 	return secOfDayIst(now) < hmsToSeconds(BETTING_START_HMS) ? 'not-open' : 'cutoff-passed';
@@ -230,7 +230,7 @@ function assertBettableDay(now: Date): { tradeDate: string; cutoffAtMs: number }
 	}
 	const state = bettingWindowState(now);
 	if (state === 'not-open') {
-		throw new BetError('WINDOW_NOT_OPEN', 'Betting opens at 15:00 IST.');
+		throw new BetError('WINDOW_NOT_OPEN', 'Betting opens at 15:15 IST.');
 	}
 	if (state === 'cutoff-passed') {
 		throw new BetError('CUTOFF_PASSED', 'The 15:20 cutoff has passed.');
@@ -268,7 +268,8 @@ export async function placeBet(
 		targetKind,
 		deltaPoints,
 		store,
-		live
+		live,
+		now
 	);
 	if (!option) {
 		throw new BetError('INVALID_TARGET', 'That target is not on today’s ladder.', {
@@ -355,7 +356,8 @@ export async function editBet(
 					targetKind,
 					deltaPoints,
 					store,
-					live
+					live,
+					now
 				);
 				if (!option) {
 					throw new BetError('INVALID_TARGET', 'That target is not on today’s ladder.', {
