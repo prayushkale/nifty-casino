@@ -37,11 +37,11 @@ const ANCHORS: Record<LadderUnderlying, number> = {
 	sensex: 82_000
 };
 
-/** Thursday 15:43:00 IST — the first instant the window is open. */
-const WINDOW_START = new Date(istAt(THURSDAY, 15, 43, 0));
+/** Thursday 15:30:00 IST — the first instant the window is open (market close). */
+const WINDOW_START = new Date(istAt(THURSDAY, 15, 30, 0));
 const WINDOW_END = new Date(istAt(THURSDAY, 17, 0, 0));
 const AFTER_WINDOW = new Date(istAt(THURSDAY, 17, 0, 1));
-const BEFORE_WINDOW = new Date(istAt(THURSDAY, 15, 42, 59));
+const BEFORE_WINDOW = new Date(istAt(THURSDAY, 15, 29, 59));
 
 const cutoffOf = (tradeDate: string): number => istAt(tradeDate, 15, 20, 0);
 const duringBetting = (tradeDate: string): number => istAt(tradeDate, 15, 5, 0);
@@ -151,7 +151,9 @@ async function world(): Promise<World> {
 		},
 		place,
 		withholdSensex: async () => {
-			bse.mockResolvedValue([buildBseSensexRow({ iclsprice: '-' })]);
+			// Nothing usable for SENSEX at all: neither the indicative nor the frozen
+			// closing LTP (the empty array is the upstream failure shape too).
+			bse.mockResolvedValue([]);
 			await dropSensexClose();
 		},
 		dropSensexClose
@@ -228,13 +230,13 @@ describe('nextDelayMs', () => {
 	});
 
 	it('never sleeps past the moment the window opens', () => {
-		// 15:20 is 23 minutes before the window; the idle cap wins.
+		// 15:20 is 10 minutes before the window; the idle cap wins.
 		expect(
 			nextDelayMs(new Date(istAt(THURSDAY, 15, 20, 0)), { action: 'idle', reason: 'BEFORE_WINDOW' })
 		).toBe(SETTLE_IDLE_RECHECK_MS);
-		// 15:42:59.5 is half a second away — wake up for it.
+		// 15:29:59.5 is half a second away — wake up for it.
 		expect(
-			nextDelayMs(new Date(istAt(THURSDAY, 15, 42, 59, 500)), {
+			nextDelayMs(new Date(istAt(THURSDAY, 15, 29, 59, 500)), {
 				action: 'idle',
 				reason: 'BEFORE_WINDOW'
 			})
@@ -398,7 +400,7 @@ describe('settleNow — the manual escape hatch', () => {
 		await w.place('priya', 'nifty');
 	});
 
-	it('settles outside the 15:43–17:00 window', async () => {
+	it('settles outside the 15:30–17:00 window', async () => {
 		const { settle } = await settleNow(w.store, THURSDAY, {
 			...w.deps,
 			capture: false,

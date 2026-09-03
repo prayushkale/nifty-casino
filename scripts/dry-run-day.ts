@@ -174,7 +174,9 @@ function cutoffMsFor(tradeDate: string): number {
 	return istHmsToUtcMs(istDateStrToMidnightUtcMs(tradeDate), CUTOFF_HMS);
 }
 
-/** 15:43:00 IST of `tradeDate` — the instant this fake day is settled at. */
+/**
+ * 15:30:00 IST of `tradeDate` — the instant this fake day is settled at.
+ */
 function settleMsFor(tradeDate: string): number {
 	return istHmsToUtcMs(istDateStrToMidnightUtcMs(tradeDate), SETTLE_START_HMS);
 }

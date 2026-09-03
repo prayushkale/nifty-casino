@@ -15,7 +15,7 @@
  * `VITEST` guard keeps it out of the test run entirely.
  *
  * `startSettleScheduler()` is the same shape one task later: on weekdays between
- * 15:43 and 17:00 IST it captures the official closes and settles the day,
+ * 15:30 and 17:00 IST it captures the official closes and settles the day,
  * retrying every minute while an exchange is late. It is the only caller of the
  * settlement engine in the request path; `settleNow` is the manual escape hatch a
  * human uses on a stuck day (documented in the RUNBOOK, Task 16).

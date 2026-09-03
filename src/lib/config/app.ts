@@ -158,13 +158,21 @@ export const LEADERBOARD_CACHE_TTL_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 /**
- * Official-close capture + settlement may first fire here, IST — one minute after
- * {@link AUCTION_END_HMS}, so a nominal 15:42:00 finish is already on disk. The
- * capture itself still refuses to run before 15:42 and the scheduler keeps
- * re-checking until {@link SETTLE_END_HMS}, which is what absorbs an auction
- * extension (PLAN §6 R2): closes that are not there yet are retried, never guessed.
+ * The exchange's regular-session close, IST. The final index prices freeze in the
+ * feeds at this instant (NSE E1 `last`, BSE `ltp` — both carry `15:30` timestamps
+ * after it) and settlement may first fire here: bets are already locked at
+ * {@link CUTOFF_HMS} 15:20, so settling at the close cannot race a late bet. The
+ * capture prefers the exchange's indicative-close fields but falls back to this
+ * frozen LTP when they have been zeroed out, and the scheduler keeps re-checking
+ * until {@link SETTLE_END_HMS}.
  */
-export const SETTLE_START_HMS = { h: 15, m: 43, s: 0 } as const;
+export const MARKET_CLOSE_HMS = { h: 15, m: 30, s: 0 } as const;
+
+/**
+ * Official-close capture + settlement may first fire here, IST — exactly at the
+ * market close, so the moment the final 15:30 price lands the day settles.
+ */
+export const SETTLE_START_HMS = MARKET_CLOSE_HMS;
 
 /**
  * Last instant the settlement window stays open, IST (inclusive). Past this the
@@ -176,9 +184,10 @@ export const SETTLE_END_HMS = { h: 17, m: 0, s: 0 } as const;
 /**
  * Re-check cadence inside the settlement window (ms). A cycle that finds the
  * official closes missing (or only some of them) waits this long and tries again
- * rather than settling on a live indicative.
+ * rather than settling on a live indicative. Kept tight so the reward lands the
+ * moment the final price appears.
  */
-export const SETTLE_RETRY_MS = 60_000;
+export const SETTLE_RETRY_MS = 30_000;
 
 /** Re-check cadence outside the settlement window (ms) — do not hammer timers for 22h. */
 export const SETTLE_IDLE_RECHECK_MS = 30_000;

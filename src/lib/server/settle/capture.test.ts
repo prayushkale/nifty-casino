@@ -18,17 +18,17 @@ import { istAt } from '$lib/server/cas/test-clock';
 import { MemoryStore, type GameStore } from '$lib/server/db';
 import type { Underlying } from '$lib/server/db/types';
 import {
-	auctionEndMsFor,
 	captureIsComplete,
 	captureOfficialCloses,
+	marketCloseMsFor,
 	type OfficialCloseFetchers
 } from './capture';
 
-/** A Thursday; 15:42:00 IST is the auction's nominal end. */
+/** A Thursday; 15:30:00 IST is the market close — the earliest settle instant. */
 const THURSDAY = '2026-08-27';
 const IN_WINDOW = new Date(istAt(THURSDAY, 15, 43, 0));
-const BEFORE_END = new Date(istAt(THURSDAY, 15, 41, 59, 999));
-const AT_END = new Date(istAt(THURSDAY, 15, 42, 0));
+const BEFORE_CLOSE = new Date(istAt(THURSDAY, 15, 29, 59, 999));
+const AT_CLOSE = new Date(istAt(THURSDAY, 15, 30, 0));
 
 let store: GameStore;
 let nseE1: ReturnType<typeof vi.fn>;
@@ -59,9 +59,9 @@ const closesFor = async (): Promise<Partial<Record<Underlying, number>>> => {
 	return Object.fromEntries(rows.map((row) => [row.underlying, row.close]));
 };
 
-describe('the auction-end guard', () => {
-	it('refuses to fetch or write before 15:42:00 IST', async () => {
-		const report = await captureOfficialCloses(store, BEFORE_END, theFetchers());
+describe('the market-close guard', () => {
+	it('refuses to fetch or write before 15:30:00 IST', async () => {
+		const report = await captureOfficialCloses(store, BEFORE_CLOSE, theFetchers());
 
 		expect(report.attempted).toBe(false);
 		expect(report.reason).toBe('BEFORE_AUCTION_END');
@@ -70,15 +70,15 @@ describe('the auction-end guard', () => {
 		expect(await store.closes.getIndexCloses(THURSDAY)).toHaveLength(0);
 	});
 
-	it('starts one instant after the auction end', async () => {
-		const report = await captureOfficialCloses(store, AT_END, theFetchers());
+	it('starts exactly at the market close', async () => {
+		const report = await captureOfficialCloses(store, AT_CLOSE, theFetchers());
 		expect(report.attempted).toBe(true);
 		expect(report.reason).toBeUndefined();
 	});
 
 	it('derives the deadline from the trade date, not the wall clock', () => {
-		expect(auctionEndMsFor(THURSDAY)).toBe(istAt(THURSDAY, 15, 42, 0));
-		expect(auctionEndMsFor('2026-09-01')).toBe(istAt('2026-09-01', 15, 42, 0));
+		expect(marketCloseMsFor(THURSDAY)).toBe(istAt(THURSDAY, 15, 30, 0));
+		expect(marketCloseMsFor('2026-09-01')).toBe(istAt('2026-09-01', 15, 30, 0));
 	});
 });
 
@@ -113,12 +113,13 @@ describe('a good capture', () => {
 });
 
 describe('a feed that is not ready yet', () => {
-	it('writes nothing when every indicative is still zero or "-"', async () => {
-		// The literal upstream shape outside the CAS window: every indicative absent.
+	it('falls back to the frozen closing LTP when the indicatives are zeroed out', async () => {
+		// The literal upstream shape minutes after the CAS window: every indicative
+		// absent, but the last-traded price frozen at the 15:30 close.
 		nseE1.mockResolvedValue(
 			buildNseIndexDataResponse([
 				buildNseIndexQuote({ indexName: 'NIFTY 50', indicativeClose: 0 }),
-				buildNseIndexQuote({ indexName: 'NIFTY BANK', indicativeClose: 0 })
+				buildNseIndexQuote({ indexName: 'NIFTY BANK', indicativeClose: 0, last: 56_210.4 })
 			])
 		);
 		nseE3.mockResolvedValue(buildMarketStatusResponse({ marketState: [] }));
@@ -127,10 +128,28 @@ describe('a feed that is not ready yet', () => {
 		const report = await captureOfficialCloses(store, IN_WINDOW, theFetchers());
 
 		expect(report.attempted).toBe(true);
-		expect(report.written).toEqual([]);
-		expect(report.missing).toEqual(['nifty', 'banknifty', 'sensex']);
-		expect(captureIsComplete(report)).toBe(false);
-		expect(await store.closes.getIndexCloses(THURSDAY)).toHaveLength(0);
+		expect(report.written).toEqual(['nifty', 'banknifty', 'sensex']);
+		expect(report.missing).toEqual([]);
+		expect(captureIsComplete(report)).toBe(true);
+		expect(report.origins).toEqual({
+			nifty: 'nse-e1-ltp',
+			banknifty: 'nse-e1-ltp',
+			sensex: 'bse-ltp'
+		});
+		await expect(closesFor()).resolves.toMatchObject({
+			nifty: 24_630.2,
+			banknifty: 56_210.4,
+			sensex: 78_831.32
+		});
+	});
+
+	it('prefers a published indicative over the LTP fallback', async () => {
+		bse.mockResolvedValue([buildBseSensexRow({ iclsprice: '-' })]);
+
+		const report = await captureOfficialCloses(store, IN_WINDOW, theFetchers());
+
+		expect(report.origins).toEqual({ nifty: 'nse-e1', banknifty: 'nse-e1', sensex: 'bse-ltp' });
+		await expect(closesFor()).resolves.toMatchObject({ nifty: 25_050.5, sensex: 78_831.32 });
 	});
 
 	it('writes nothing when the exchanges answer with no rows at all', async () => {
@@ -170,16 +189,18 @@ describe('a feed that is not ready yet', () => {
 		await expect(closesFor()).resolves.toMatchObject({ nifty: 24_624.65, sensex: 78_845.12 });
 	});
 
-	it('does not fall back to E3 for BANKNIFTY, which E3 does not carry', async () => {
+	it('does not fall back to E3 for BANKNIFTY, which E3 does not carry — but the LTP does', async () => {
 		nseE1.mockResolvedValue(
 			buildNseIndexDataResponse([
 				buildNseIndexQuote({ indexName: 'NIFTY 50', indicativeClose: 25_050.5 }),
-				buildNseIndexQuote({ indexName: 'NIFTY BANK', indicativeClose: 0 })
+				buildNseIndexQuote({ indexName: 'NIFTY BANK', indicativeClose: 0, last: 56_210.4 })
 			])
 		);
 
 		const report = await captureOfficialCloses(store, IN_WINDOW, theFetchers());
-		expect(report.missing).toEqual(['banknifty']);
+		expect(report.origins.nifty).toBe('nse-e1');
+		expect(report.origins.banknifty).toBe('nse-e1-ltp');
+		await expect(closesFor()).resolves.toMatchObject({ banknifty: 56_210.4 });
 	});
 });
 

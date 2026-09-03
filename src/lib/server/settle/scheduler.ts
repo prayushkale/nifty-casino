@@ -2,10 +2,11 @@
  * The settlement scheduler (PLAN §5 T9) — the clock around the engine, and the
  * reason a day can never be settled on a guess.
  *
- * Window: weekdays, 15:43:00–17:00:00 IST. 15:43 because the auction's nominal
- * end is 15:42 and the capture refuses anything earlier; 17:00 because SEBI's
- * auction extensions are measured in minutes, not hours, and a day that still has
- * no official close two hours later has a feed problem, not a timing one.
+ * Window: weekdays, 15:30:00–17:00:00 IST. 15:30 because that is the market close:
+ * the final index prices freeze in the feeds at that instant and the bets were
+ * already locked at 15:20, so the day can settle the moment the final price
+ * arrives; 17:00 because a day that still has no official close two hours later
+ * has a feed problem, not a timing one.
  *
  * The loop, every SETTLE_RETRY_MS inside the window:
  *
@@ -18,7 +19,7 @@
  * wrongly-settled one is not.
  *
  * Everything the loop decides is in {@link planSettleCycle} and
- * {@link nextDelayMs}, both pure — the table of "what happens at 15:42, 15:43,
+ * {@link nextDelayMs}, both pure — the table of "what happens at 15:30, 15:31,
  * 16:59, 17:01, on a Saturday, on a day with no session" is unit-tested without a
  * timer. Mirrors ./cas-poller: `globalThis` guard so dev HMR cannot start a second
  * loop, `VITEST`/`SETTLE_DISABLED` kill switches, unref'd timers, and a log tag
@@ -42,7 +43,7 @@ import { getStore, type GameStore } from '$lib/server/db';
 import type { SessionStatus } from '$lib/server/db/types';
 import { unrefTimer } from '$lib/server/sse';
 import {
-	auctionEndMsFor,
+	marketCloseMsFor,
 	captureIsComplete,
 	captureOfficialCloses,
 	realOfficialCloseFetchers,
@@ -182,7 +183,7 @@ export type SettleNowOptions = SettleDeps & {
 };
 
 /**
- * Manual settlement, bypassing the 15:43–17:00 window — the RUNBOOK's lever for a
+ * Manual settlement, bypassing the 15:30–17:00 window — the RUNBOOK's lever for a
  * stuck day, and what the T17 dry-run script calls. It does NOT bypass the
  * honesty rules:
  *
@@ -204,7 +205,7 @@ export async function settleNow(
 	const mayCapture =
 		options.capture !== false &&
 		tradeDate === istDateStr(now) &&
-		now.getTime() >= auctionEndMsFor(tradeDate);
+		now.getTime() >= marketCloseMsFor(tradeDate);
 	if (mayCapture) {
 		capture = await captureOfficialCloses(
 			store,
@@ -213,7 +214,7 @@ export async function settleNow(
 		);
 	} else if (options.capture !== false) {
 		log.info(
-			`[settle] ${tradeDate}: not capturing (only today's IST date may be captured, after 15:42) — settling against index_closes as it stands`
+			`[settle] ${tradeDate}: not capturing (only today's IST date may be captured, after 15:30) — settling against index_closes as it stands`
 		);
 	}
 
