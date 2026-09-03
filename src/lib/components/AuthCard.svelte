@@ -1,10 +1,13 @@
 <script lang="ts">
+	import SubpageNav from '$lib/components/game/SubpageNav.svelte';
+
 	/** Narrow centred card every /auth/* page renders inside. T11 restyles in place. */
 	export let title: string;
 	export let subtitle: string | null = null;
 </script>
 
 <div class="mx-auto flex w-full max-w-md flex-col gap-6 py-12">
+	<SubpageNav homeLabel="Back to home" />
 	<header class="space-y-1.5">
 		<h1 class="text-2xl font-semibold text-zinc-900 dark:text-gold-glow">{title}</h1>
 		{#if subtitle}

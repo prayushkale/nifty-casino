@@ -31,7 +31,7 @@
  * `sum(ledger) == balance − SIGNUP_BONUS` hold from the very first row.
  */
 import { SIGNUP_BONUS } from '$lib/config/app';
-import { env } from '$env/dynamic/private';
+import { serverEnv as env } from '$lib/server/env';
 import type { Cookies } from '@sveltejs/kit';
 import { DbError, type GameStore, type Profile } from '$lib/server/db';
 import { handleCandidates, sanitizeHandle, type Rng } from './handles';

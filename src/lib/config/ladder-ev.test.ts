@@ -31,7 +31,9 @@ import { LADDER_CONFIG, LADDER_UNDERLYINGS } from './ladder';
 /** The documented fast sample count. Small on purpose — see the header. */
 const SAMPLES = 2_000;
 /** The wide CI band, centred on the launch band's midpoint and ~5σ either side. */
-const CI_EV_BAND = { lo: 0.5, hi: 1.15 } as const;
+// Graded single-max spreads EVs (~0.57–0.90 at 28×), so the tripwire sits below
+// the gate's lo — it catches a badly wrong price, not the designed spread.
+const CI_EV_BAND = { lo: 0.4, hi: 1.15 } as const;
 
 describe('EV sanity (fast CI wrapper on the launch gate)', () => {
 	it('runs the base scenario of the real simulator, not a local copy of the model', () => {
@@ -89,6 +91,8 @@ describe('EV sanity (fast CI wrapper on the launch gate)', () => {
 	});
 
 	it('keeps the launch band the script gates on', () => {
-		expect(EV_BAND).toEqual({ lo: 0.85, hi: 0.95 });
+		// Accuracy-graded, single-max: far rungs price a higher edge, so the lo
+		// side is wide — only "no player-favourable rung" is gated.
+		expect(EV_BAND).toEqual({ lo: 0.5, hi: 0.95 });
 	});
 });

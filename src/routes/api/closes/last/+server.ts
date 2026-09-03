@@ -2,9 +2,9 @@ import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { istDateStr, istDateStrToMidnightUtcMs } from '$lib/time/ist';
 import { getLadderForDate } from '$lib/server/ladder';
+import { fetchLivePrevCloses } from '$lib/server/live-closes';
 import type { LadderUnderlying } from '$lib/config/ladder';
 import { getStore } from '$lib/server/db';
-import { casNum } from '$lib/server/cas/types';
 
 const IST_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -30,11 +30,6 @@ const IST_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
  * synthetic line.
  */
 export const prerender = false;
-
-function positiveOrNull(raw: unknown): number | null {
-	const n = casNum(raw);
-	return n !== null && n > 0 ? n : null;
-}
 
 export const GET: RequestHandler = async ({ url }) => {
 	const rawDate = url.searchParams.get('date');
@@ -68,77 +63,26 @@ export const GET: RequestHandler = async ({ url }) => {
 		sensex: closes.sensex !== null ? 'db' : 'none'
 	};
 
-	const needNse = closes.nifty === null || closes.banknifty === null;
-	const needBse = closes.sensex === null;
+	const needs = {
+		nifty: closes.nifty === null,
+		banknifty: closes.banknifty === null,
+		sensex: closes.sensex === null
+	};
 
-	if (!needNse && !needBse) {
+	if (!needs.nifty && !needs.banknifty && !needs.sensex) {
 		return json({ tradeDate, closes, sources }, { headers: { 'cache-control': 'no-store' } });
 	}
 
-	// Live fallback — best-effort, never fails the request
-	const tasks: Promise<void>[] = [];
-
-	if (needNse) {
-		tasks.push(
-			(async () => {
-				try {
-					const { fetchIndexData } = await import('$lib/server/cas/nse-api');
-					const raw: unknown = await fetchIndexData();
-					const rows: unknown[] = Array.isArray((raw as Record<string, unknown>)?.data)
-						? ((raw as Record<string, unknown>).data as unknown[])
-						: [];
-					const findPrev = (indexName: string): number | null => {
-						const row = rows.find(
-							(r) => (r as Record<string, unknown>)?.indexName === indexName
-						) as Record<string, unknown> | undefined;
-						if (!row) return null;
-						return positiveOrNull(row.previousClose);
-					};
-					if (closes.nifty === null) {
-						const v = findPrev('NIFTY 50');
-						if (v !== null) {
-							closes.nifty = v;
-							sources.nifty = 'live';
-						}
-					}
-					if (closes.banknifty === null) {
-						const v = findPrev('NIFTY BANK');
-						if (v !== null) {
-							closes.banknifty = v;
-							sources.banknifty = 'live';
-						}
-					}
-				} catch {
-					// swallow — blocked/auth/timeout keeps the chart on its synthetic anchor or blank
-				}
-			})()
-		);
+	// Live fallback — best-effort, never fails the request. Shared with the
+	// ladder's own fallback (`$lib/server/live-closes`) so the chart centre and
+	// the bettable ladder agree on the same last closing price.
+	const live = await fetchLivePrevCloses(needs);
+	for (const underlying of ['nifty', 'banknifty', 'sensex'] as const) {
+		if (closes[underlying] === null && live[underlying] !== null) {
+			closes[underlying] = live[underlying];
+			sources[underlying] = 'live';
+		}
 	}
-
-	if (needBse) {
-		tasks.push(
-			(async () => {
-				try {
-					const { fetchBseSensexRows } = await import('$lib/server/cas/bse-api');
-					const rows = await fetchBseSensexRows();
-					const sensexRow = (rows as unknown[]).find(
-						(r) => (r as Record<string, unknown>)?.indxnm === 'BSE SENSEX'
-					) as Record<string, unknown> | undefined;
-					if (sensexRow && closes.sensex === null) {
-						const v = positiveOrNull(sensexRow.Prev_Close);
-						if (v !== null) {
-							closes.sensex = v;
-							sources.sensex = 'live';
-						}
-					}
-				} catch {
-					// swallow
-				}
-			})()
-		);
-	}
-
-	await Promise.allSettled(tasks);
 
 	return json({ tradeDate, closes, sources }, { headers: { 'cache-control': 'no-store' } });
 };

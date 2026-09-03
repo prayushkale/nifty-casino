@@ -20,9 +20,28 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Cookies } from '@sveltejs/kit';
 import { getStore, type GameStore } from '$lib/server/db';
-import { env } from '$env/dynamic/private';
+import { serverEnv as env } from '$lib/server/env';
 import { DEV_COOKIE_NAME, isDevAuthEnabled, readDevUserId } from './devAuth';
+import { sanitizeHandle } from './handles';
 import { getSupabaseForEvent, type CookieEvent } from './supabaseServer';
+
+/**
+ * Display handle when the `profiles` row is missing (the 0002 trigger never
+ * ran for this user). The row is the authority and is preferred; this only
+ * keeps an authenticated player from looking signed out — `{ authenticated:
+ * true, handle: null }` is what left the header showing Log in / Sign up
+ * after a successful login. Repair of the row itself happens at login time
+ * (see ./supabaseBackfill), not on this read path.
+ */
+export function fallbackDisplayHandle(user: {
+	user_metadata?: Record<string, unknown> | null;
+	email?: string | null;
+}): string | null {
+	const meta = sanitizeHandle(user.user_metadata?.['handle']);
+	if (meta) return meta;
+	const localPart = typeof user.email === 'string' ? user.email.split('@')[0] : '';
+	return sanitizeHandle(localPart);
+}
 
 /** Where the identity came from — the header chrome shows it, `/api/auth/me` returns it. */
 export type AuthSource = 'supabase' | 'dev' | null;
@@ -52,7 +71,7 @@ export type SessionEvent = CookieEvent & { url: URL; cookies: Cookies };
 export type ResolveIdentityDeps = {
 	/** Defaults to the process-wide store. */
 	store?: GameStore;
-	/** Defaults to `$env/dynamic/private`. */
+	/** Defaults to the merged server env (public + private, see `$lib/server/env`). */
 	env?: Record<string, string | undefined>;
 	/** Test seam: stand in for `getSupabaseForEvent`, which would hit the network. */
 	supabase?: SupabaseClient | null;
@@ -74,7 +93,11 @@ export async function resolveIdentity(
 		const profile = needsProfileRow(event.url.pathname)
 			? await store.profiles.getProfile(user.id)
 			: null;
-		return { userId: user.id, handle: profile?.handle ?? null, source: 'supabase' };
+		return {
+			userId: user.id,
+			handle: profile?.handle ?? fallbackDisplayHandle(user),
+			source: 'supabase'
+		};
 	}
 
 	// -- 2. Dev cookie -------------------------------------------------------

@@ -25,7 +25,7 @@
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ email, password })
 			});
-			const data = (await res.json().catch(() => ({}))) as { error?: string };
+			const data = (await res.json().catch(() => ({}))) as { error?: string; handle?: string };
 			if (!res.ok) {
 				error =
 					data.error === 'AUTH_NOT_CONFIGURED'
@@ -33,7 +33,10 @@
 						: (data.error ?? 'Could not log in.');
 				return;
 			}
-			await goto('/');
+			// Re-run every server load with the fresh session cookies before
+			// painting `/` — a plain `goto` could otherwise render the header from
+			// stale anonymous data and stick on Log in / Sign up.
+			await goto('/', { invalidateAll: true });
 		} finally {
 			busy = false;
 		}
@@ -77,7 +80,7 @@
 				devError = data.fields?.handle ?? data.fields?.tos ?? data.error ?? 'Could not enter.';
 				return;
 			}
-			await goto('/');
+			await goto('/', { invalidateAll: true });
 		} finally {
 			devBusy = false;
 		}

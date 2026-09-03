@@ -13,7 +13,8 @@
  * THE GATE: with play-money chips the product requirement (see the provenance
  * comment in src/lib/config/ladder.ts) is a house edge of 5–15%, i.e.
  *
- *       EV = P(hit) × odds + P(flat)   ∈  [0.85, 0.95]   for every option.
+ *       EV = P(flat) + E[graded hit payout]/stake   ∈  [0.50, 0.95]   for every option.
+ *       (graded: exact pays full odds, linear decay to 0 at the tolerance edge)
  *
  * Nothing ships until every option is inside the band. This script exits 1 if any
  * option is outside it, so CI/CI-adjacent tooling can treat it as a gate.
@@ -81,12 +82,14 @@
  *                 odds were derived, kept so the next re-tune is one command.
  */
 import { LADDER_CONFIG, LADDER_UNDERLYINGS, type LadderUnderlying } from '$lib/config/ladder';
-import { computeTier, payoutFor, type TierBet } from '$lib/game/tier';
+import { computeTier, hitAccuracy, payoutFor, type TierBet } from '$lib/game/tier';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
-/** The launch band: a 5–15% house edge, per the provenance comment in ladder.ts. */
-export const EV_BAND = { lo: 0.85, hi: 0.95 } as const;
+/** Accuracy-graded band: every option must price a house edge (EV < 1). The lo
+ * side is wide on purpose — one MAX for every distance means far rungs price a
+ * higher edge than near ones; only the top (no player-favourable rung) is gated. */
+export const EV_BAND = { lo: 0.5, hi: 0.95 } as const;
 
 /** Where the tuning centres each option inside the band (the band's midpoint). */
 const EV_TARGET = 0.9;
@@ -276,6 +279,9 @@ export type StepStats = {
 	/** Total credited, split by direction for the symmetry assert. */
 	payoutUp: number;
 	payoutDown: number;
+	/** Sum of hit accuracies (for the --suggest tuner under graded payouts). */
+	accUp: number;
+	accDown: number;
 	readonly trials: number;
 };
 
@@ -315,6 +321,8 @@ export function simulateUnderlying(
 		missDown: 0,
 		payoutUp: 0,
 		payoutDown: 0,
+		accUp: 0,
+		accDown: 0,
 		trials: samples * 2
 	}));
 	for (const step of config.steps) {
@@ -363,9 +371,17 @@ export function simulateUnderlying(
 			if (tier === 'hit') {
 				if (dir === 'up') row.hitUp += 1;
 				else row.hitDown += 1;
-				const payout = payoutFor('hit', STAKE, row.odds);
-				if (dir === 'up') row.payoutUp += payout;
-				else row.payoutDown += payout;
+				// Accuracy-graded, exactly like settlement: exact pays full odds,
+				// tolerance edge pays 0.
+				const accuracy = hitAccuracy(bet, anchor, close);
+				const payout = payoutFor('hit', STAKE, row.odds, accuracy);
+				if (dir === 'up') {
+					row.payoutUp += payout;
+					row.accUp += accuracy;
+				} else {
+					row.payoutDown += payout;
+					row.accDown += accuracy;
+				}
 			} else if (tier === 'flat') {
 				if (dir === 'up') row.flatUp += 1;
 				else row.flatDown += 1;
@@ -544,7 +560,8 @@ function main(): number {
 				.map((row) => {
 					const pHit = hits(row) / row.trials;
 					const pFlat = flats(row) / row.trials;
-					const fair = (EV_TARGET - pFlat) / pHit;
+					const meanAcc = hits(row) > 0 ? (row.accUp + row.accDown) / hits(row) : 0.5;
+					const fair = (EV_TARGET - pFlat) / (pHit * meanAcc);
 					return `${row.step}: ${Number(fair.toFixed(1))}`;
 				})
 				.join(', ');

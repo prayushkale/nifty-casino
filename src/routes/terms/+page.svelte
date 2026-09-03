@@ -1,11 +1,9 @@
 <script lang="ts">
+	import SubpageNav from '$lib/components/game/SubpageNav.svelte';
 	import { LADDER_CONFIG, LADDER_UNDERLYINGS } from '$lib/config/ladder';
 
 	/** Highest odds on the board, derived — this copy must never drift from the config. */
 	const maxOdds = Math.max(
-		...LADDER_UNDERLYINGS.flatMap((u) => Object.values(LADDER_CONFIG[u].odds))
-	);
-	const minOdds = Math.min(
 		...LADDER_UNDERLYINGS.flatMap((u) => Object.values(LADDER_CONFIG[u].odds))
 	);
 
@@ -44,9 +42,9 @@
 	 */
 	const payouts: { outcome: string; condition: string; result: string }[] = [
 		{
-			outcome: '🎯 Hit',
+			outcome: '🎯 Hit (graded by accuracy)',
 			condition: 'Right direction, and the close lands inside the target band.',
-			result: `Your stake × the odds on the rung you picked (up to ${maxOdds}×).`
+			result: `Exactly on target pays your stake × up to ${maxOdds}×. The further the close lands from your target, the less it pays — decaying linearly to nothing at the band edge.`
 		},
 		{
 			outcome: '➖ Flat',
@@ -65,48 +63,53 @@
 	<title>Terms · NiftyCasino</title>
 </svelte:head>
 
-<article class="mx-auto flex w-full max-w-2xl flex-col gap-6 py-12 text-sm text-zinc-300">
+<article
+	class="mx-auto flex w-full max-w-2xl flex-col gap-6 py-12 text-sm text-zinc-700 dark:text-zinc-300"
+>
+	<SubpageNav />
 	<header class="space-y-1.5">
-		<h1 class="text-2xl font-semibold text-gold-glow">Terms of play</h1>
+		<h1 class="text-2xl font-semibold text-amber-600 dark:text-gold-glow">Terms of play</h1>
 		<p class="text-xs uppercase tracking-wide text-zinc-500">
 			Short version: play money, entertainment only, 18+
 		</p>
 	</header>
 
 	<!-- The payout table sits FIRST, because the confirm modal links straight here. -->
-	<section
-		id="payouts"
-		class="scroll-mt-24 rounded-xl border border-felt-700 bg-felt-900/80 p-5 shadow-card"
-	>
-		<h2 class="text-base font-semibold text-gold">How a bet pays</h2>
-		<p class="mt-1.5 text-zinc-400">
+	<section id="payouts" class="nc-card scroll-mt-24 p-5">
+		<h2 class="text-base font-semibold text-amber-700 dark:text-gold">How a bet pays</h2>
+		<p class="mt-1.5 text-zinc-600 dark:text-zinc-400">
 			Every call is measured against the index's previous close, using the exchange's published
 			closing auction value. Three things can happen:
 		</p>
 		<ul class="mt-4 flex flex-col gap-3">
 			{#each payouts as row}
-				<li class="rounded-lg border border-felt-800 bg-felt-900/60 p-3">
-					<p class="font-semibold text-zinc-100">{row.outcome}</p>
-					<p class="mt-1 text-zinc-400">{row.condition}</p>
-					<p class="mt-1 text-zinc-300">{row.result}</p>
+				<li
+					class="rounded-lg border border-zinc-200 bg-zinc-50 p-3 dark:border-felt-800 dark:bg-felt-900/60"
+				>
+					<p class="font-semibold text-zinc-900 dark:text-zinc-100">{row.outcome}</p>
+					<p class="mt-1 text-zinc-600 dark:text-zinc-400">{row.condition}</p>
+					<p class="mt-1 text-zinc-700 dark:text-zinc-300">{row.result}</p>
 				</li>
 			{/each}
 		</ul>
 		<p class="mt-4 text-xs text-zinc-500">
-			The odds for a given target ({minOdds}× to {maxOdds}×) are shown on the ladder chip and
-			repeated on the confirm screen before any stake is taken. One bet per index per day; bets can
-			be edited or cancelled until the 15:20 IST cutoff.
+			Every rung pays up to {maxOdds}× for an exact hit — the multiplier depends on how close the
+			close lands to your target, not on how far the target sits from the previous close. The figure
+			on each ladder chip and on the confirm screen is that exact-hit max. One bet per index per
+			day; bets can be edited or cancelled until the 15:20 IST cutoff.
 		</p>
 	</section>
 
 	{#each terms as section}
-		<section class="rounded-xl border border-felt-800 bg-felt-900/40 p-5">
-			<h2 class="text-base font-semibold text-gold">{section.heading}</h2>
-			<p class="mt-1.5 leading-relaxed text-zinc-400">{section.body}</p>
+		<section
+			class="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-felt-800 dark:bg-felt-900/40 dark:shadow-none"
+		>
+			<h2 class="text-base font-semibold text-amber-700 dark:text-gold">{section.heading}</h2>
+			<p class="mt-1.5 leading-relaxed text-zinc-600 dark:text-zinc-400">{section.body}</p>
 		</section>
 	{/each}
 
-	<p class="border-t border-felt-700 pt-6 text-xs text-zinc-500">
+	<p class="border-t border-zinc-200 pt-6 text-xs text-zinc-500 dark:border-felt-700">
 		Questions or account deletion requests: open an issue on the project repository.
 	</p>
 </article>

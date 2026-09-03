@@ -9,6 +9,7 @@ import {
 	validationFailed
 } from '$lib/server/auth/http';
 import { validateSignupRequest } from '$lib/server/auth/signup';
+import { ensureSupabaseProfile } from '$lib/server/auth/supabaseBackfill';
 import { getSupabaseForEvent } from '$lib/server/auth/supabaseServer';
 
 /**
@@ -49,7 +50,22 @@ export const POST: RequestHandler = async (event) => {
 			}
 		});
 		if (error) return supabaseErrorResponse(error);
-		return json({ needsVerify: !data.session, handle });
+		// Confirmations-off means the session is live right now but the trigger
+		// may not have written the wallet — same backfill as login, best effort.
+		let confirmedHandle = handle;
+		if (data.session && data.user) {
+			try {
+				const { profile } = await ensureSupabaseProfile(getStore(), {
+					userId: data.user.id,
+					email,
+					requestedHandle: handle
+				});
+				confirmedHandle = profile.handle;
+			} catch {
+				/* login-time repair covers it — signup itself succeeded */
+			}
+		}
+		return json({ needsVerify: !data.session, handle: confirmedHandle });
 	}
 
 	// ------------------------------------------------------------- dev fallback

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageData } from './$types';
 	import Skeleton from '$lib/components/game/Skeleton.svelte';
+	import SubpageNav from '$lib/components/game/SubpageNav.svelte';
 	import { INDEX_LABELS } from '$lib/stores/game';
 	import { rankFor } from '$lib/config/ranks';
 	import type { LadderUnderlying } from '$lib/config/ladder';
@@ -37,9 +38,9 @@
 	type Tier = 'hit' | 'flat' | 'miss';
 	const TIER_BADGE: Record<Tier, string> = { hit: '🎯', flat: '➖', miss: '💀' };
 	const TIER_COLOR: Record<Tier, string> = {
-		hit: 'border-up/40 bg-up/10 text-up',
-		flat: 'border-felt-700 bg-felt-800 text-zinc-400',
-		miss: 'border-down/40 bg-down/10 text-down'
+		hit: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:border-up/40 dark:bg-up/10 dark:text-up',
+		flat: 'border-zinc-300 bg-zinc-100 text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-400',
+		miss: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:border-down/40 dark:bg-down/10 dark:text-down'
 	};
 
 	const ordinal = (n: number): string =>
@@ -61,12 +62,15 @@
 </svelte:head>
 
 <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 py-8">
+	<SubpageNav />
 	<header class="flex flex-wrap items-end justify-between gap-3">
 		<div>
 			<p class="text-xs font-medium uppercase tracking-widest text-zinc-500">The floor</p>
-			<h1 class="text-2xl font-semibold text-gold-glow sm:text-3xl">Leaderboard</h1>
+			<h1 class="text-2xl font-semibold text-amber-600 dark:text-gold-glow sm:text-3xl">
+				Leaderboard
+			</h1>
 		</div>
-		<p class="text-[11px] text-zinc-600">
+		<p class="text-[11px] text-zinc-500 dark:text-zinc-500">
 			Play-money chips only — NC has no cash value. Refreshes every 30s.
 		</p>
 	</header>
@@ -76,7 +80,7 @@
 	{#if !data.board}
 		<div class="flex flex-col gap-4" role="status" aria-label="Loading the leaderboard">
 			{#each [0, 1, 2] as i (i)}
-				<div class="rounded-xl border border-felt-700 bg-felt-900/80 p-4 shadow-card">
+				<div class="nc-card p-4">
 					<div class="nc-skeleton mb-3 h-3.5 w-32" aria-hidden="true" />
 					<Skeleton lines={3} label="Loading the board" />
 				</div>
@@ -84,46 +88,49 @@
 		</div>
 	{:else}
 		<!-- ── 🏆 top balances ─────────────────────────────────────────────────────── -->
-		<section class="rounded-xl border border-felt-700 bg-felt-900/80 shadow-card">
+		<section class="nc-card overflow-hidden">
 			<h2
-				class="border-b border-felt-800 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-zinc-400"
+				class="border-b border-zinc-200 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:border-felt-800 dark:text-zinc-400"
 			>
 				<span aria-hidden="true">🏆</span> Top balances
 			</h2>
 			{#if data.board.balances.length === 0}
 				<p class="px-4 py-6 text-sm text-zinc-500">
 					No players yet —
-					<a href="/auth/signup" class="text-gold underline decoration-gold-dim"
+					<a href="/auth/signup" class="text-amber-700 underline decoration-gold-dim dark:text-gold"
 						>take the first seat.</a
 					>
 				</p>
 			{:else}
-				<ol class="divide-y divide-felt-800">
+				<ol class="divide-y divide-zinc-200 dark:divide-felt-800">
 					{#each data.board.balances as row, i (row.handle)}
 						<li class="min-h-[44px]">
 							<a
 								href="/u/{row.handle}"
-								class="flex min-h-[44px] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-felt-800/60"
+								class="flex min-h-[44px] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-zinc-100 dark:hover:bg-felt-800/60"
 							>
 								<span
 									class="num w-9 shrink-0 text-right text-xs {i === 0
-										? 'text-gold'
-										: 'text-zinc-600'}">{ordinal(i + 1)}</span
+										? 'text-amber-600 dark:text-gold'
+										: 'text-zinc-500 dark:text-zinc-500'}">{ordinal(i + 1)}</span
 								>
 								<span class="min-w-0 flex-1">
-									<span class="block truncate text-sm font-semibold text-zinc-100"
+									<span
+										class="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100"
 										>{row.handle}</span
 									>
 									<span
-										class="mt-0.5 block truncate text-[11px] text-zinc-600"
+										class="mt-0.5 block truncate text-[11px] text-zinc-500 dark:text-zinc-500"
 										title={rankFor(row.xp).tagline}>{badge(row.xp)}</span
 									>
 								</span>
 								<span class="shrink-0 text-right">
-									<span class="num block text-sm font-semibold text-gold-glow"
+									<span class="num block text-sm font-semibold text-amber-600 dark:text-gold-glow"
 										>🪙 {fmt(row.balance)}</span
 									>
-									<span class="mt-0.5 block text-[11px] text-zinc-600">win {pct(row.winRate)}</span>
+									<span class="mt-0.5 block text-[11px] text-zinc-500 dark:text-zinc-500"
+										>win {pct(row.winRate)}</span
+									>
 								</span>
 							</a>
 						</li>
@@ -133,38 +140,43 @@
 		</section>
 
 		<!-- ── 🔥 longest streaks ─────────────────────────────────────────────────── -->
-		<section class="rounded-xl border border-felt-700 bg-felt-900/80 shadow-card">
+		<section class="nc-card overflow-hidden">
 			<h2
-				class="border-b border-felt-800 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-zinc-400"
+				class="border-b border-zinc-200 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:border-felt-800 dark:text-zinc-400"
 			>
 				<span aria-hidden="true">🔥</span> Longest streaks
 			</h2>
 			{#if data.board.streaks.length === 0}
 				<p class="px-4 py-6 text-sm text-zinc-500">
 					No streaks running — bet on
-					<a href="/" class="text-gold underline decoration-gold-dim">a trading day</a> to start one.
+					<a href="/" class="text-amber-700 underline decoration-gold-dim dark:text-gold"
+						>a trading day</a
+					> to start one.
 				</p>
 			{:else}
-				<ol class="divide-y divide-felt-800">
+				<ol class="divide-y divide-zinc-200 dark:divide-felt-800">
 					{#each data.board.streaks as row, i (row.handle)}
 						<li class="min-h-[44px]">
 							<a
 								href="/u/{row.handle}"
-								class="flex min-h-[44px] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-felt-800/60"
+								class="flex min-h-[44px] items-center gap-3 px-4 py-2.5 transition-colors hover:bg-zinc-100 dark:hover:bg-felt-800/60"
 							>
 								<span
 									class="num w-9 shrink-0 text-right text-xs {i === 0
-										? 'text-gold'
-										: 'text-zinc-600'}">{ordinal(i + 1)}</span
+										? 'text-amber-600 dark:text-gold'
+										: 'text-zinc-500 dark:text-zinc-500'}">{ordinal(i + 1)}</span
 								>
-								<span class="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-100">
+								<span
+									class="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+								>
 									{row.handle}
 								</span>
 								<span
-									class="shrink-0 text-right text-[11px] text-zinc-600"
+									class="shrink-0 text-right text-[11px] text-zinc-500 dark:text-zinc-500"
 									title={rankFor(row.xp).tagline}>{badge(row.xp)}</span
 								>
-								<span class="num w-16 shrink-0 text-right text-sm font-semibold text-zinc-100"
+								<span
+									class="num w-16 shrink-0 text-right text-sm font-semibold text-zinc-900 dark:text-zinc-100"
 									>🔥 {fmt(row.streakDays)}</span
 								>
 							</a>
@@ -175,22 +187,25 @@
 		</section>
 
 		<!-- ── ⚡ today's biggest calls ───────────────────────────────────────────── -->
-		<section class="rounded-xl border border-felt-700 bg-felt-900/80 shadow-card">
+		<section class="nc-card overflow-hidden">
 			<h2
-				class="flex flex-wrap items-baseline justify-between gap-2 border-b border-felt-800 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-zinc-400"
+				class="flex flex-wrap items-baseline justify-between gap-2 border-b border-zinc-200 px-4 py-3 text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:border-felt-800 dark:text-zinc-400"
 			>
 				<span><span aria-hidden="true">⚡</span> Today's biggest calls</span>
-				<span class="text-[11px] font-normal normal-case tracking-normal text-zinc-600"
+				<span
+					class="text-[11px] font-normal normal-case tracking-normal text-zinc-500 dark:text-zinc-500"
 					>{day(data.board.tradeDate)} · settled</span
 				>
 			</h2>
 			{#if data.board.topWins.length === 0}
 				<p class="px-4 py-6 text-sm text-zinc-500">
 					Nothing settled today yet — the board fills in once
-					<a href="/" class="text-gold underline decoration-gold-dim">the 15:20 cutoff</a> passes.
+					<a href="/" class="text-amber-700 underline decoration-gold-dim dark:text-gold"
+						>the 15:20 cutoff</a
+					> passes.
 				</p>
 			{:else}
-				<ol class="divide-y divide-felt-800">
+				<ol class="divide-y divide-zinc-200 dark:divide-felt-800">
 					{#each data.board.topWins as row, i (i)}
 						{@const name = indexLabel(row.underlying)}
 						<li class="flex min-h-[44px] flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5">
@@ -200,17 +215,23 @@
 									: 'text-zinc-600'}">{ordinal(i + 1)}</span
 							>
 							<span class="min-w-0 flex-1">
-								<span class="block truncate text-sm font-semibold text-zinc-100">
+								<span class="block truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 									{row.handle}
 								</span>
-								<span class="mt-0.5 block text-[11px] uppercase tracking-wide text-zinc-600">
+								<span
+									class="mt-0.5 block text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500"
+								>
 									{name}
-									<span class={row.targetKind === 'up' ? 'text-up' : 'text-down'}>
+									<span
+										class={row.targetKind === 'up'
+											? 'text-emerald-600 dark:text-up'
+											: 'text-rose-600 dark:text-down'}
+									>
 										{row.targetKind === 'up' ? '▲' : '▼'}{fmt(row.deltaPoints)}
 									</span>
-									<span class="text-zinc-700" aria-hidden="true">·</span>
+									<span class="text-zinc-300 dark:text-zinc-700" aria-hidden="true">·</span>
 									staked {fmt(row.stake)}
-									<span class="text-zinc-700" aria-hidden="true">·</span>
+									<span class="text-zinc-300 dark:text-zinc-700" aria-hidden="true">·</span>
 									{row.odds}×
 								</span>
 							</span>
@@ -224,10 +245,10 @@
 							</span>
 							<span
 								class="num w-20 shrink-0 text-right text-sm font-semibold {row.payout > row.stake
-									? 'text-up'
+									? 'text-emerald-600 dark:text-up'
 									: row.payout === 0
-										? 'text-down'
-										: 'text-zinc-400'}"
+										? 'text-rose-600 dark:text-down'
+										: 'text-zinc-500 dark:text-zinc-400'}"
 							>
 								{row.payout === 0 ? '—' : `+${fmt(row.payout)}`}
 							</span>
@@ -237,7 +258,7 @@
 			{/if}
 		</section>
 
-		<p class="text-center text-[11px] text-zinc-600">
+		<p class="text-center text-[11px] text-zinc-500 dark:text-zinc-500">
 			<!-- See $lib/server/leaderboard: a weekly board needs a precomputed column
 			     the v1 data model deliberately does not have, so v1 ships all-time only. -->
 			All-time boards in v1 — weekly rankings land with the precomputed rollups.

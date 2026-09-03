@@ -38,7 +38,7 @@ import { isWeekend, shiftIstDate } from '$lib/time/ist';
 import { getLadderForDate, invalidateLadderCache } from '$lib/server/ladder';
 import type { GameStore } from '$lib/server/db';
 import type { Underlying } from '$lib/server/db/types';
-import { computeTier, payoutFor, type PayableTier } from '$lib/game/tier';
+import { computeTier, hitAccuracy, payoutFor, type PayableTier } from '$lib/game/tier';
 
 /** How many calendar days back a streak (or an anchor) may look for a trading day. */
 export const SETTLE_MAX_LOOKBACK_DAYS = 10;
@@ -200,13 +200,26 @@ export async function settleSession(
 				missing.add(bet.underlying);
 				continue;
 			}
+			// Accuracy-graded: exact pays full odds, tolerance edge pays 0.
+			const accuracy =
+				tier === 'hit'
+					? hitAccuracy(
+							{
+								underlying,
+								targetKind: bet.targetKind,
+								deltaPoints: bet.deltaPoints
+							},
+							prevClose,
+							close
+						)
+					: 1;
 			outcomes.push({
 				betId: bet.id,
 				userId: bet.userId,
 				stake: bet.stake,
 				odds: bet.odds,
 				tier,
-				payout: payoutFor(tier, bet.stake, bet.odds)
+				payout: payoutFor(tier, bet.stake, bet.odds, accuracy)
 			});
 			report.tiers[tier] += 1;
 		}

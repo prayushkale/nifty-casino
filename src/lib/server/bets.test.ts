@@ -109,7 +109,7 @@ describe('placeBet', () => {
 			underlying: 'nifty',
 			targetKind: 'up',
 			deltaPoints: 50,
-			odds: 13.9,
+			odds: 28,
 			stake: 100
 		});
 		// The bet row does not carry the target level (settlement derives it from the
@@ -120,9 +120,9 @@ describe('placeBet', () => {
 
 	it('prices every index from its own configured odds', async () => {
 		const cases: [Underlying, 'up' | 'down', number, number][] = [
-			['nifty', 'up', 50, 13.9],
-			['banknifty', 'down', 200, 19.1],
-			['sensex', 'up', 400, 20.3]
+			['nifty', 'up', 50, 28],
+			['banknifty', 'down', 200, 28],
+			['sensex', 'up', 400, 28]
 		];
 		for (const [underlying, targetKind, deltaPoints, odds] of cases) {
 			const bet = await placeBet(
@@ -279,7 +279,7 @@ describe('editBet', () => {
 		);
 
 		expect(bet.id).toBe(id);
-		expect(bet).toMatchObject({ targetKind: 'down', deltaPoints: 200, odds: 22.4, stake: 100 });
+		expect(bet).toMatchObject({ targetKind: 'down', deltaPoints: 200, odds: 28, stake: 100 });
 		expect((await store.profiles.getProfile(U1))?.balance).toBe(900); // 100 out, 100 in, 100 out
 		expect((await store.pots.getDailyPot(THURSDAY))?.totalStaked).toBe(100);
 		await expectConsistent(store);

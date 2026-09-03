@@ -55,20 +55,20 @@
 				return {
 					mark: '🎯 HIT',
 					text: `+${formatNC(payout)} NC`,
-					tone: 'border-up/40 bg-up/10 text-up'
+					tone: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:border-up/40 dark:bg-up/10 dark:text-up'
 				};
 			}
 			if (bet.settlementTier === 'flat') {
 				return {
 					mark: '➖ FLAT',
 					text: `refund ${formatNC(payout)} NC`,
-					tone: 'border-felt-700 bg-felt-800 text-zinc-400'
+					tone: 'border-zinc-300 bg-zinc-100 text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-400'
 				};
 			}
 			return {
 				mark: '💀 MISS',
 				text: `−${formatNC(bet.stake)} NC`,
-				tone: 'border-down/40 bg-down/10 text-down'
+				tone: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:border-down/40 dark:bg-down/10 dark:text-down'
 			};
 		}
 
@@ -82,27 +82,27 @@
 			return {
 				mark: 'LIVE',
 				text: 'waiting for the feed',
-				tone: 'border-felt-700 bg-felt-800 text-zinc-500'
+				tone: 'border-zinc-300 bg-zinc-100 text-zinc-500 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-500'
 			};
 		}
 		if (projection.tier === 'hit') {
 			return {
 				mark: 'LIVE · if closed now 🎯',
 				text: `+${formatNC(projection.payout)} NC`,
-				tone: 'border-up/40 bg-up/10 text-up'
+				tone: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:border-up/40 dark:bg-up/10 dark:text-up'
 			};
 		}
 		if (projection.tier === 'flat') {
 			return {
 				mark: 'LIVE · if closed now ➖',
 				text: `refund ${formatNC(projection.payout)} NC`,
-				tone: 'border-felt-700 bg-felt-800 text-zinc-400'
+				tone: 'border-zinc-300 bg-zinc-100 text-zinc-600 dark:border-felt-700 dark:bg-felt-800 dark:text-zinc-400'
 			};
 		}
 		return {
 			mark: 'LIVE · if closed now 💀',
 			text: `−${formatNC(bet.stake)} NC`,
-			tone: 'border-down/40 bg-down/10 text-down'
+			tone: 'border-rose-500/40 bg-rose-500/10 text-rose-700 dark:border-down/40 dark:bg-down/10 dark:text-down'
 		};
 	}
 
@@ -121,12 +121,13 @@
 	}, 0);
 </script>
 
-<section
-	class="rounded-xl border border-felt-700 bg-felt-900/80 shadow-card"
-	aria-label="Your bets today"
->
-	<header class="flex items-baseline justify-between gap-3 border-b border-felt-800 px-4 py-3">
-		<h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-400">Your bets today</h2>
+<section class="nc-card overflow-hidden" aria-label="Your bets today">
+	<header
+		class="flex items-baseline justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-felt-800"
+	>
+		<h2 class="text-xs font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">
+			Your bets today
+		</h2>
 		{#if bets.length > 0}
 			<p class="num text-[11px] text-zinc-500">
 				{formatNC(totalStaked)} NC staked
@@ -134,10 +135,10 @@
 					· if closed now
 					<span
 						class={projectedTotal > totalStaked
-							? 'text-up'
+							? 'text-emerald-600 dark:text-up'
 							: projectedTotal < totalStaked
-								? 'text-down'
-								: 'text-zinc-400'}
+								? 'text-rose-600 dark:text-down'
+								: 'text-zinc-500 dark:text-zinc-400'}
 					>
 						{projectedTotal >= totalStaked ? '+' : ''}{formatNC(projectedTotal)}
 					</span>
@@ -148,14 +149,16 @@
 
 	{#if !authed}
 		<p class="px-4 py-6 text-sm text-zinc-500">
-			<a href="/auth/login" class="text-gold underline decoration-gold-dim">Log in</a>
+			<a href="/auth/login" class="text-amber-700 underline decoration-gold-dim dark:text-gold"
+				>Log in</a
+			>
 			to see your calls here.
 		</p>
 	{:else if bets.length === 0}
 		<div class="px-4 py-8 text-center">
 			<p class="text-2xl" aria-hidden="true">🎲</p>
-			<p class="mt-2 text-sm text-zinc-400">Place your first bet</p>
-			<p class="mt-1 text-xs text-zinc-600">
+			<p class="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Place your first bet</p>
+			<p class="mt-1 text-xs text-zinc-500 dark:text-zinc-500">
 				Pick a target on any index above — one bet per index, editable until 15:20 IST.
 			</p>
 		</div>
@@ -163,22 +166,26 @@
 		{#if error}
 			<p class="nc-alert mx-4 mt-3" role="alert">{error}</p>
 		{/if}
-		<ul class="divide-y divide-felt-800">
+		<ul class="divide-y divide-zinc-200 dark:divide-felt-800">
 			{#each bets as bet (bet.id)}
 				{@const line = legLine(bet)}
 				<li class="flex items-center justify-between gap-3 px-4 py-3">
 					<div class="min-w-0">
 						<p
-							class="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold uppercase tracking-wide text-zinc-200"
+							class="flex flex-wrap items-baseline gap-x-2 text-sm font-semibold uppercase tracking-wide text-zinc-900 dark:text-zinc-200"
 						>
 							{INDEX_SHORT[bet.underlying]}
-							<span class="num {bet.targetKind === 'up' ? 'text-up' : 'text-down'}">
+							<span
+								class="num {bet.targetKind === 'up'
+									? 'text-emerald-600 dark:text-emerald-600 dark:text-up'
+									: 'text-rose-600 dark:text-down'}"
+							>
 								{bet.targetKind === 'up' ? '▲' : '▼'}{formatNC(bet.deltaPoints)}
 							</span>
 							<span class="num text-xs font-normal text-zinc-500">{formatNC(bet.stake)} NC</span>
 						</p>
-						<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-600">
-							@ {bet.odds}× · pays {formatNC(payoutFor('hit', bet.stake, bet.odds))}
+						<p class="mt-0.5 text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+							@ up to {bet.odds}× · exact pays {formatNC(payoutFor('hit', bet.stake, bet.odds))}
 						</p>
 					</div>
 					<div class="flex shrink-0 items-center gap-2">
@@ -191,7 +198,7 @@
 						{#if !bet.settlementTier && live}
 							<button
 								type="button"
-								class="min-h-[44px] rounded-lg px-2 text-xs font-medium text-gold transition hover:text-gold-glow disabled:opacity-40"
+								class="min-h-[44px] rounded-lg px-2 text-xs font-medium text-amber-700 transition hover:text-amber-600 disabled:opacity-40 dark:text-gold dark:hover:text-gold-glow"
 								disabled={pendingId === bet.id}
 								on:click={() => dispatch('focus', bet.underlying)}
 							>
@@ -199,7 +206,7 @@
 							</button>
 							<button
 								type="button"
-								class="min-h-[44px] rounded-lg px-2 text-xs font-medium text-zinc-500 transition hover:text-down disabled:opacity-40"
+								class="min-h-[44px] rounded-lg px-2 text-xs font-medium text-zinc-500 transition hover:text-rose-600 disabled:opacity-40 dark:hover:text-down"
 								disabled={pendingId === bet.id}
 								on:click={() => doCancel(bet)}
 							>

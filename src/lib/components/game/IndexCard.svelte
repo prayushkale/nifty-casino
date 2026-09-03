@@ -271,7 +271,11 @@
 									<span class="num text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{formatNC(Math.round(option.target))}
 									</span>
-									<span class="num text-[10px] text-gold-dim">{option.odds}×</span>
+									<span
+										class="num text-[10px] text-gold-dim"
+										title="Exact hit pays {option.odds}× — nearby pays proportionally less"
+										>up to {option.odds}×</span
+									>
 								</div>
 							{/if}
 						{/each}
@@ -308,7 +312,7 @@
 					>
 					<span class="num text-xs text-zinc-500">@ {myBet.odds}×</span>
 					<span class="num text-xs text-up"
-						>pays {formatNC(payoutFor('hit', myBet.stake, myBet.odds))}</span
+						>exact pays {formatNC(payoutFor('hit', myBet.stake, myBet.odds))}</span
 					>
 				</p>
 				{#if projection}
@@ -349,6 +353,8 @@
 			</div>
 		{:else}
 			<!-- ── ladder chips ─────────────────────────────────────────────────────── -->
+			<!-- Disabled chips stay full-opacity on purpose: the prices ARE the board,
+			     so dimming them would hide the product outside the betting window. -->
 			<div class="flex flex-col gap-1.5" role="group" aria-label="{label} targets">
 				{#each steps as row (row.step)}
 					<div class="grid grid-cols-2 gap-1.5">
@@ -363,7 +369,7 @@
 										? 'border-gold bg-gold/15 shadow-glow ring-1 ring-gold'
 										: 'border-zinc-200 bg-zinc-50 hover:border-gold-dim dark:border-felt-700 dark:bg-felt-800'} {chipsEnabled
 										? ''
-										: 'cursor-not-allowed opacity-40'}"
+										: 'cursor-not-allowed'}"
 									aria-pressed={isSelected}
 									disabled={!chipsEnabled}
 									on:click={() => pick(option)}
@@ -378,7 +384,11 @@
 									<span class="num text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 										{formatNC(Math.round(option.target))}
 									</span>
-									<span class="num text-[10px] text-gold-dim">{option.odds}×</span>
+									<span
+										class="num text-[10px] text-gold-dim"
+										title="Exact hit pays {option.odds}× — nearby pays proportionally less"
+										>up to {option.odds}×</span
+									>
 								</button>
 							{/if}
 						{/each}
@@ -415,7 +425,7 @@
 				{/if}
 				{#if selected && stakeOk && potential !== null}
 					<p class="mt-1.5 text-xs text-zinc-600 dark:text-zinc-500">
-						{formatNC(Math.round(selected.target))} pays
+						{formatNC(Math.round(selected.target))} exact pays
 						<span class="num text-up">+{formatNC(potential)} NC</span>
 						{#if projection}
 							· if it closed now:
