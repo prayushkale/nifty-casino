@@ -8,11 +8,14 @@
  *   This file runs the SAME model — the same distributions and the same
  *   `computeTier`/`payoutFor` grading — at 2,000 samples so that `npm test` catches
  *   an odds edit that silently wrecks the house edge before anyone remembers to run
- *   the script. 2,000 samples gives EV a Monte-Carlo standard error of roughly ±0.07,
- *   which is why the band here is deliberately WIDE (0.5, 1.15): the test is a tripwire
- *   for a badly wrong price, not a measurement of the 5–15% edge the launch gate
- *   demands. Re-tuning odds means re-running the script and updating ladder.ts's
+ *   the script. Re-tuning means re-running the script and updating ladder.ts's
  *   provenance comment; this test should survive that untouched.
+ *
+ * STRIKE-LADDER NOTE: with one MAX (28×) shared by every strike across the whole
+ * ±3% CAS band, EV falls with distance by design — a near strike is likelier to
+ * be hit than a far one at the same price. So unlike the old four-rung ladder,
+ * there is NO per-option EV floor: the gate is the CEILING (no player-favourable
+ * strike) plus the pooled house-edge check.
  *
  * The script is imported, not reimplemented, so the two can never drift: a change to
  * the distribution model moves both together.
@@ -23,17 +26,16 @@ import {
 	DEFAULT_SEED,
 	EV_BAND,
 	SCENARIOS,
+	SIM_ANCHORS,
 	STAKE,
 	simulateUnderlying
 } from '../../../scripts/simulate-ev';
-import { LADDER_CONFIG, LADDER_UNDERLYINGS } from './ladder';
+import { MAX_HIT_ODDS, ladderStrikesForAnchor, LADDER_UNDERLYINGS } from './ladder';
 
 /** The documented fast sample count. Small on purpose — see the header. */
 const SAMPLES = 2_000;
-/** The wide CI band, centred on the launch band's midpoint and ~5σ either side. */
-// Graded single-max spreads EVs (~0.57–0.90 at 28×), so the tripwire sits below
-// the gate's lo — it catches a badly wrong price, not the designed spread.
-const CI_EV_BAND = { lo: 0.4, hi: 1.15 } as const;
+/** The CI band: the ceiling is the real gate; the floor is 0 by construction. */
+const CI_EV_BAND = { lo: 0, hi: 1.15 } as const;
 
 describe('EV sanity (fast CI wrapper on the launch gate)', () => {
 	it('runs the base scenario of the real simulator, not a local copy of the model', () => {
@@ -43,29 +45,27 @@ describe('EV sanity (fast CI wrapper on the launch gate)', () => {
 		expect(SCENARIOS.filter((s) => s.gated)).toHaveLength(1);
 	});
 
-	it('prices every configured step', () => {
+	it('simulates exactly the strikes the generator builds for the sim anchor', () => {
 		for (const underlying of LADDER_UNDERLYINGS) {
 			const rows = simulateUnderlying(underlying, BASE_SCENARIO, 0, SAMPLES, DEFAULT_SEED);
+			// Rows follow the strikes the generator builds: every CE distance, then
+			// any PE distance that does not already share a CE strike row.
+			const { up, down } = ladderStrikesForAnchor(SIM_ANCHORS[underlying], underlying);
 			expect(
 				rows.map((r) => r.step),
 				underlying
-			).toEqual([...LADDER_CONFIG[underlying].steps]);
+			).toEqual([...up, ...down.filter((step) => !up.includes(step))]);
 			for (const row of rows) {
-				expect(row.odds, `${underlying} ±${row.step}`).toBe(
-					LADDER_CONFIG[underlying].odds[row.step]
-				);
+				expect(row.odds, `${underlying} ±${row.step}`).toBe(MAX_HIT_ODDS);
 			}
 		}
 	});
 
-	it('lands every option inside the wide CI band — a silent odds break fails here', () => {
+	it('keeps every strike at or under the ceiling — no player-favourable strike', () => {
 		for (const underlying of LADDER_UNDERLYINGS) {
 			const rows = simulateUnderlying(underlying, BASE_SCENARIO, 0, SAMPLES, DEFAULT_SEED);
 			for (const row of rows) {
 				const ev = (row.payoutUp + row.payoutDown) / (row.trials * STAKE);
-				expect(ev, `${underlying} ±${row.step} @ ${row.odds}× EV=${ev.toFixed(4)}`).toBeGreaterThan(
-					CI_EV_BAND.lo
-				);
 				expect(ev, `${underlying} ±${row.step} @ ${row.odds}× EV=${ev.toFixed(4)}`).toBeLessThan(
 					CI_EV_BAND.hi
 				);
@@ -73,10 +73,11 @@ describe('EV sanity (fast CI wrapper on the launch gate)', () => {
 		}
 	});
 
-	it('still grades a house edge, not a player-favourable ladder', () => {
-		// The wide band above would let EV drift to 1.14 without failing; that is a
-		// loss-making game. At the launch odds the *point estimate* sits ~0.90, so a
-		// run whose pooled EV is not clearly below 1 means the odds moved.
+	it('still grades a pooled house edge, not a player-favourable ladder', () => {
+		// The ceiling above is per-strike; this is the whole-book check. With one
+		// MAX over a fine ladder the pooled EV sits well below the old 0.90 launch
+		// point — near strikes carry the play, far strikes carry the edge — but it
+		// must never reach 1.
 		let staked = 0;
 		let credited = 0;
 		for (const underlying of LADDER_UNDERLYINGS) {
@@ -87,12 +88,12 @@ describe('EV sanity (fast CI wrapper on the launch gate)', () => {
 		}
 		const ev = credited / staked;
 		expect(ev).toBeLessThan(EV_BAND.hi);
-		expect(ev).toBeGreaterThan(EV_BAND.lo - 0.05);
 	});
 
 	it('keeps the launch band the script gates on', () => {
-		// Accuracy-graded, single-max: far rungs price a higher edge, so the lo
-		// side is wide — only "no player-favourable rung" is gated.
-		expect(EV_BAND).toEqual({ lo: 0.5, hi: 0.95 });
+		// Accuracy-graded single-max over the full strike band: only the ceiling
+		// (no player-favourable strike) is gated; lo = 0 documents that far
+		// strikes are allowed to be house-heavy.
+		expect(EV_BAND).toEqual({ lo: 0, hi: 0.95 });
 	});
 });

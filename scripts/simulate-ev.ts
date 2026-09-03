@@ -81,17 +81,25 @@
  *                 EV_TARGET under the BASE case — the documented way the launch
  *                 odds were derived, kept so the next re-tune is one command.
  */
-import { LADDER_CONFIG, LADDER_UNDERLYINGS, type LadderUnderlying } from '$lib/config/ladder';
+import {
+	MAX_HIT_ODDS,
+	ladderStrikesForAnchor,
+	LADDER_UNDERLYINGS,
+	type LadderUnderlying
+} from '$lib/config/ladder';
 import { computeTier, hitAccuracy, payoutFor, type TierBet } from '$lib/game/tier';
 import { realpathSync } from 'node:fs';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
-/** Accuracy-graded band: every option must price a house edge (EV < 1). The lo
- * side is wide on purpose — one MAX for every distance means far rungs price a
- * higher edge than near ones; only the top (no player-favourable rung) is gated. */
-export const EV_BAND = { lo: 0.5, hi: 0.95 } as const;
+/** Accuracy-graded band for the STRIKE ladder: with one MAX shared by every
+ * strike across the whole ±3% CAS band, EV falls with distance BY DESIGN — a
+ * near strike is simply likelier to be hit than a far one at the same price.
+ * The gate therefore only enforces the CEILING (no strike may price
+ * player-favourable, EV ≤ hi) plus the pooled house-edge check below; the lo
+ * side documents that far strikes are allowed to be house-heavy. */
+export const EV_BAND = { lo: 0, hi: 0.95 } as const;
 
-/** Where the tuning centres each option inside the band (the band's midpoint). */
+/** Where the tuning aid centres a strike (informational for the fine ladder). */
 const EV_TARGET = 0.9;
 
 /** Max tolerated |EV(up) − EV(down)|, expressed as a z-score against the paired
@@ -127,7 +135,7 @@ const ANNUAL_VOL: Record<LadderUnderlying, number> = {
  * relatively wider bands and slightly higher hit rates. Re-run the gate if the
  * index regime moves far from these.
  */
-const SIM_ANCHORS: Record<LadderUnderlying, number> = {
+export const SIM_ANCHORS: Record<LadderUnderlying, number> = {
 	nifty: 25_000,
 	banknifty: 56_000,
 	sensex: 82_000
@@ -269,7 +277,7 @@ function makeStudentT(nextNormal: () => number, df: number): () => number {
 export type StepStats = {
 	readonly step: number;
 	readonly odds: number;
-	/** Trial counts, kept per direction so the symmetry check can pair them. */
+	/** Trials graded on this strike (CE and PE legs share a row and add up). */
 	hitUp: number;
 	hitDown: number;
 	flatUp: number;
@@ -282,7 +290,7 @@ export type StepStats = {
 	/** Sum of hit accuracies (for the --suggest tuner under graded payouts). */
 	accUp: number;
 	accDown: number;
-	readonly trials: number;
+	trials: number;
 };
 
 /**
@@ -302,7 +310,6 @@ export function simulateUnderlying(
 	samples: number,
 	seed: number
 ): StepStats[] {
-	const config = LADDER_CONFIG[underlying];
 	const anchor = SIM_ANCHORS[underlying];
 	const sigmaDay = ((ANNUAL_VOL[underlying] * scenario.volMult) / Math.sqrt(TRADING_DAYS)) * anchor;
 	const driftPts = scenario.drift * anchor;
@@ -310,9 +317,13 @@ export function simulateUnderlying(
 	// Bet objects are built once and reused: `computeTier` only reads them, and
 	// 28M allocations per run is a price nobody should pay for a fresh literal.
 	const bets: { bet: TierBet; stats: StepStats; dir: 'up' | 'down' }[] = [];
-	const stats: StepStats[] = config.steps.map((step) => ({
+	const strikes = ladderStrikesForAnchor(anchor, underlying);
+	// CE (up) and PE (down) legs of the SAME strike share one stats row: a close at
+	// the level is a hit for both, so pooling them halves the trials per strike and
+	// exactly mirrors how the chain lists one row per strike with two sides.
+	const stats: StepStats[] = strikes.up.map((step) => ({
 		step,
-		odds: config.odds[step],
+		odds: MAX_HIT_ODDS,
 		hitUp: 0,
 		hitDown: 0,
 		flatUp: 0,
@@ -323,12 +334,36 @@ export function simulateUnderlying(
 		payoutDown: 0,
 		accUp: 0,
 		accDown: 0,
-		trials: samples * 2
+		trials: samples
 	}));
-	for (const step of config.steps) {
+	for (const step of strikes.up) {
 		const row = stats.find((s) => s.step === step);
-		if (!row) throw new Error(`unpriced step ${underlying} ±${step}`);
+		if (!row) throw new Error(`unpriced strike ${underlying} +${step}`);
 		bets.push({ bet: { underlying, targetKind: 'up', deltaPoints: step }, stats: row, dir: 'up' });
+	}
+	for (const step of strikes.down) {
+		// A PE distance with a matching CE distance (anchor on a spacing multiple)
+		// shares that strike's row; otherwise it owns its own.
+		let row = stats.find((s) => s.step === step);
+		if (!row) {
+			row = {
+				step,
+				odds: MAX_HIT_ODDS,
+				hitUp: 0,
+				hitDown: 0,
+				flatUp: 0,
+				flatDown: 0,
+				missUp: 0,
+				missDown: 0,
+				payoutUp: 0,
+				payoutDown: 0,
+				accUp: 0,
+				accDown: 0,
+				trials: 0
+			};
+			stats.push(row);
+		}
+		row.trials += samples;
 		bets.push({
 			bet: { underlying, targetKind: 'down', deltaPoints: step },
 			stats: row,
@@ -337,7 +372,7 @@ export function simulateUnderlying(
 	}
 
 	// The candidate rungs the magnet can pull toward, signed.
-	const magnetTargets: number[] = config.steps.flatMap((s) => [s, -s]);
+	const magnetTargets: number[] = [...strikes.up, ...strikes.down.map((s) => -s)];
 
 	const rng = scenarioRng(seed, scenarioIndex);
 	const normal = makeNormal(rng);
@@ -482,6 +517,15 @@ function main(): number {
 		for (const underlying of LADDER_UNDERLYINGS) {
 			const rows = simulateUnderlying(underlying, scenario, scenarioIndex, samples, seed);
 			if (scenario.gated) baseRows.set(underlying, rows);
+			// Round strikes make the CE and PE distance sets legitimately different
+			// off a fractional anchor (sensex 82,000 → CE 200, 350 … and PE 100, 250 …).
+			// The symmetry test below is only meaningful where the SAME distance is
+			// offered to both directions, so it runs on the shared strikes only.
+			const { up: upSteps, down: downSteps } = ladderStrikesForAnchor(
+				SIM_ANCHORS[underlying],
+				underlying
+			);
+			const sharedSteps = new Set(upSteps.filter((step) => downSteps.includes(step)));
 
 			for (const row of rows) {
 				const staked = row.trials * STAKE;
@@ -510,7 +554,7 @@ function main(): number {
 					maxSymmetryZ = z;
 					maxAsymmetry = asymmetry;
 				}
-				const symmetric = z <= 1;
+				const symmetric = !sharedSteps.has(row.step) || z <= 1;
 
 				if (scenario.gated) {
 					worstEv = Math.min(worstEv, ev);

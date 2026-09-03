@@ -19,7 +19,7 @@
 	/**
 	 * One index, the whole bet flow for it (PLAN §4 index card):
 	 *
-	 *   live value line → ladder chips → stake row → PLACE BET → confirm modal
+	 *   live value line → strike board → stake row → PLACE BET → confirm modal
 	 *
 	 * The card owns its own form state (which rung, what stake, whether the modal is
 	 * up) and nothing else. The money is the store's: a confirmed action calls the
@@ -64,6 +64,8 @@
 	let error = '';
 	/** True while the player is rewriting their existing bet instead of placing one. */
 	let editing = false;
+	/** Strike-board search: matches the strike price or the point distance. */
+	let query = '';
 
 	$: openPhase = phase === 'open';
 	$: canBet = authed && openPhase && myBet === null;
@@ -90,20 +92,57 @@
 	const fmtSigned = (n: number): string =>
 		`${n > 0 ? '+' : n < 0 ? '−' : ''}${formatNC(Math.abs(n))}`;
 
-	/** The ladder grouped by step so each row reads "▲ 50 → 25,050 | ▼ 50 → 24,950". */
-	$: steps = groupByStep(options);
+	type Strike = LadderOption & { atTheMoney: boolean };
 
-	function groupByStep(
-		opts: LadderOption[]
-	): { step: number; up: LadderOption | null; down: LadderOption | null }[] {
-		const rows = new Map<number, { up: LadderOption | null; down: LadderOption | null }>();
-		for (const option of opts) {
-			const row = rows.get(option.deltaPoints) ?? { up: null, down: null };
-			if (option.targetKind === 'up') row.up = option;
-			else row.down = option;
-			rows.set(option.deltaPoints, row);
+	/**
+	 * The chain: one row per selectable strike, sorted by LEVEL (like NSE's chain is).
+	 * A strike above the anchor is a CE (the player expects the close at/above it),
+	 * one below is a PE. The row nearest the anchor is the at-the-money strike.
+	 */
+	$: strikes = buildStrikes(options, anchor);
+
+	function buildStrikes(opts: LadderOption[], anchor0: number | null): Strike[] {
+		const sorted = [...opts].sort(
+			(a, b) => a.target - b.target || (a.targetKind < b.targetKind ? -1 : 1)
+		);
+		if (anchor0 === null || sorted.length === 0)
+			return sorted.map((o) => ({ ...o, atTheMoney: false }));
+		let nearest = sorted[0];
+		for (const option of sorted) {
+			if (Math.abs(option.target - anchor0) < Math.abs(nearest.target - anchor0)) nearest = option;
 		}
-		return [...rows.entries()].sort((a, b) => a[0] - b[0]).map(([step, row]) => ({ step, ...row }));
+		return sorted.map((option) => ({ ...option, atTheMoney: option === nearest }));
+	}
+
+	/**
+	 * The rows the player sees: `strikes` filtered by the search box. The query
+	 * matches the strike level ("24050", "24,050"), the distance ("50", "+50",
+	 * "−50"), or a side ("ce"/"pe"). Empty query = the whole chain.
+	 */
+	$: visibleStrikes = filterStrikes(strikes, query);
+
+	/** The two chain columns, like NSE's: calls on the left, puts on the right.
+	 *  Calls read lowest→highest; puts read highest→lowest, so both columns meet
+	 *  at the at-the-money strike in the middle like NSE's own chain does. */
+	$: ceStrikes = visibleStrikes.filter((strike) => strike.targetKind === 'up');
+	$: peStrikes = visibleStrikes
+		.filter((strike) => strike.targetKind === 'down')
+		.slice()
+		.sort((a, b) => b.target - a.target);
+
+	function filterStrikes(rows: Strike[], q: string): Strike[] {
+		const needle = q.trim().replace(/[\s,]/g, '').toLowerCase();
+		if (needle === '') return rows;
+		const digits = needle.replace(/^[+−-]/, '');
+		const wantsCe = /(^|[0-9±−-])ce$|^(ce|call|above)/.test(needle);
+		const wantsPe = /(^|[0-9±−-])pe$|^(pe|put|below)/.test(needle);
+		return rows.filter((strike) => {
+			const side = strike.targetKind === 'up' ? 'ce' : 'pe';
+			const sideOk = wantsCe ? side === 'ce' : wantsPe ? side === 'pe' : true;
+			const levelHit = String(Math.round(strike.target)).includes(digits);
+			const stepHit = String(strike.deltaPoints).startsWith(digits);
+			return sideOk && (levelHit || stepHit);
+		});
 	}
 
 	function pick(option: LadderOption): void {
@@ -243,44 +282,42 @@
 	</header>
 
 	{#if expanded}
-		{#if steps.length === 0 && loading && phase === 'pre'}
+		{#if strikes.length === 0 && loading && phase === 'pre'}
 			<!-- The ladder has not landed yet (an anonymous→authed swap, a slow read).
 			     Shimmer rather than declare the day ladder-less while the read runs. -->
 			<Skeleton lines={4} label="Loading the {label} ladder" />
-		{:else if steps.length === 0}
+		{:else if strikes.length === 0}
 			<p
 				class="rounded-lg border bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:border-felt-700 dark:bg-felt-800/60 dark:text-zinc-400"
 			>
 				No ladder for {label} today — the anchor price has not landed yet.
 			</p>
 		{:else if !authed}
-			<!-- Read-only board for a stranger: the ladder is the product's shop window. -->
-			<div class="flex flex-col gap-1.5 opacity-60" aria-label="{label} targets (view only)">
-				{#each steps as row (row.step)}
-					<div class="grid grid-cols-2 gap-1.5">
-						{#each [row.up, row.down] as option}
-							{#if option}
-								<div
-									class="flex min-h-[44px] flex-col items-start rounded-lg border bg-zinc-50 px-2.5 py-1.5 text-left dark:border-felt-700 dark:bg-felt-800"
-								>
-									<span
-										class="num text-[11px] font-semibold {option.targetKind === 'up'
-											? 'text-up'
-											: 'text-down'}"
-									>
-										{option.targetKind === 'up' ? '▲' : '▼'} ±{formatNC(option.deltaPoints)}
-									</span>
-									<span class="num text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-										{formatNC(Math.round(option.target))}
-									</span>
-									<span
-										class="num text-[10px] text-gold-dim"
-										title="Exact hit pays {option.odds}× — nearby pays proportionally less"
-										>up to {option.odds}×</span
-									>
-								</div>
-							{/if}
-						{/each}
+			<!-- Read-only chain for a stranger: the strike board is the product's shop window. -->
+			<div
+				class="grid max-h-80 grid-cols-2 gap-1.5 overflow-y-auto pr-0.5 opacity-60 sm:grid-cols-3"
+				aria-label="{label} strikes (view only)"
+			>
+				{#each visibleStrikes as strike (strike.target)}
+					<div
+						class="flex min-h-[44px] flex-col items-start rounded-lg border bg-zinc-50 px-2.5 py-1.5 text-left {strike.atTheMoney
+							? 'border-gold-dim'
+							: 'border-zinc-200 dark:border-felt-700'} bg-zinc-50 dark:bg-felt-800"
+					>
+						<span
+							class="num text-sm font-semibold text-zinc-900 dark:text-zinc-100 {strike.targetKind ===
+							'up'
+								? 'text-up'
+								: 'text-down'}"
+						>
+							{formatNC(Math.round(strike.target))}
+							{strike.targetKind === 'up' ? 'CE' : 'PE'}
+							{strike.atTheMoney ? '·ATM' : ''}
+						</span>
+						<span class="num text-[10px] text-zinc-500 dark:text-zinc-500">
+							{fmtSigned(strike.targetKind === 'up' ? strike.deltaPoints : -strike.deltaPoints)} · up
+							to {strike.odds}×</span
+						>
 					</div>
 				{/each}
 			</div>
@@ -306,8 +343,19 @@
 							? 'text-up'
 							: 'text-down'}"
 					>
-						{myBet.targetKind === 'up' ? '▲' : '▼'}
-						{myBet.targetKind === 'up' ? '+' : '−'}{formatNC(myBet.deltaPoints)}
+						{anchor === null
+							? ''
+							: formatNC(
+									Math.round(
+										anchor + (myBet.targetKind === 'up' ? myBet.deltaPoints : -myBet.deltaPoints)
+									)
+								)}
+						{myBet.targetKind === 'up' ? 'CE' : 'PE'}
+						<span class="text-xs font-normal text-zinc-500"
+							>({fmtSigned(
+								myBet.targetKind === 'up' ? myBet.deltaPoints : -myBet.deltaPoints
+							)})</span
+						>
 					</span>
 					<span class="num text-sm text-zinc-700 dark:text-zinc-300"
 						>{formatNC(myBet.stake)} NC</span
@@ -355,47 +403,104 @@
 			</div>
 		{:else}
 			<!-- ── ladder chips ─────────────────────────────────────────────────────── -->
-			<!-- Disabled chips stay full-opacity on purpose: the prices ARE the board,
-			     so dimming them would hide the product outside the betting window. -->
-			<div class="flex flex-col gap-1.5" role="group" aria-label="{label} targets">
-				{#each steps as row (row.step)}
-					<div class="grid grid-cols-2 gap-1.5">
-						{#each [row.up, row.down] as option}
-							{#if option}
-								{@const isSelected =
-									selected?.targetKind === option.targetKind &&
-									selected?.deltaPoints === option.deltaPoints}
-								<button
-									type="button"
-									class="flex min-h-[44px] flex-col items-start rounded-lg border px-2.5 py-1.5 text-left transition {isSelected
-										? 'border-gold bg-gold/15 shadow-glow ring-1 ring-gold'
+			<!-- The board reads like an NSE option chain: CE strikes in the left column,
+		     PE strikes in the right. Every strike is a ROUND level — a whole multiple
+		     of the index's spacing inside the ±3% CAS band — and the strike IS the
+		     level the player expects the close to land at. Spans the whole band,
+		     scrolls, and a search box jumps straight to a level. Disabled strikes stay
+		     full-opacity on purpose: the prices ARE the board, so dimming them would
+		     hide the product outside the betting window. -->
+			{#if strikes.length > 6}
+				<label class="sr-only" for="strike-search-{underlying}">Search {label} strikes</label>
+				<input
+					id="strike-search-{underlying}"
+					class="nc-input py-1.5 text-sm"
+					type="search"
+					autocomplete="off"
+					placeholder="Search strike — e.g. 24050 CE…"
+					bind:value={query}
+				/>
+			{/if}
+			{#if visibleStrikes.length === 0 && query.trim() !== ''}
+				<p class="text-xs text-zinc-500 dark:text-zinc-500" role="status">
+					No strike matches “{query}” on today's chain.
+				</p>
+			{/if}
+			<div
+				class="overflow-y-auto rounded-lg border border-zinc-100 p-1.5 {strikes.length > 8
+					? 'max-h-96 dark:border-felt-800'
+					: ''}"
+				role="group"
+				aria-label="{label} option chain"
+			>
+				<div class="grid grid-cols-2 gap-1.5">
+					<div class="flex flex-col gap-1.5" role="group" aria-label="{label} CE strikes">
+						{#each ceStrikes as strike (strike.deltaPoints)}
+							{@const isSelected =
+								selected?.targetKind === 'up' && selected?.deltaPoints === strike.deltaPoints}
+							<button
+								type="button"
+								class="flex min-h-[44px] flex-col items-start rounded-lg border px-2.5 py-1.5 text-left transition {isSelected
+									? 'border-gold bg-gold/15 shadow-glow ring-1 ring-gold'
+									: strike.atTheMoney
+										? 'border-gold-dim/60 bg-zinc-50 hover:border-gold dark:bg-felt-800'
 										: 'border-zinc-200 bg-zinc-50 hover:border-gold-dim dark:border-felt-700 dark:bg-felt-800'} {chipsEnabled
-										? ''
-										: 'cursor-not-allowed'}"
-									aria-pressed={isSelected}
-									disabled={!chipsEnabled}
-									on:click={() => pick(option)}
+									? ''
+									: 'cursor-not-allowed'}"
+								aria-pressed={isSelected}
+								aria-label="{formatNC(Math.round(strike.target))} CE"
+								disabled={!chipsEnabled}
+								on:click={() => pick(strike)}
+							>
+								<span class="num text-sm font-semibold text-up">
+									{formatNC(Math.round(strike.target))} CE
+									{strike.atTheMoney ? '· ATM' : ''}
+								</span>
+								<span class="num text-[10px] text-zinc-500 dark:text-zinc-500">
+									{fmtSigned(strike.deltaPoints)} ·
+									<span
+										class="text-gold-dim"
+										title="Exact hit pays {strike.odds}× — nearby pays proportionally less"
+										>up to {strike.odds}×</span
+									></span
 								>
-									<span
-										class="num text-[11px] font-semibold {option.targetKind === 'up'
-											? 'text-up'
-											: 'text-down'}"
-									>
-										{option.targetKind === 'up' ? '▲' : '▼'} ±{formatNC(option.deltaPoints)}
-									</span>
-									<span class="num text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-										{formatNC(Math.round(option.target))}
-									</span>
-									<span
-										class="num text-[10px] text-gold-dim"
-										title="Exact hit pays {option.odds}× — nearby pays proportionally less"
-										>up to {option.odds}×</span
-									>
-								</button>
-							{/if}
+							</button>
 						{/each}
 					</div>
-				{/each}
+					<div class="flex flex-col gap-1.5" role="group" aria-label="{label} PE strikes">
+						{#each peStrikes as strike (strike.deltaPoints)}
+							{@const isSelected =
+								selected?.targetKind === 'down' && selected?.deltaPoints === strike.deltaPoints}
+							<button
+								type="button"
+								class="flex min-h-[44px] flex-col items-start rounded-lg border px-2.5 py-1.5 text-left transition {isSelected
+									? 'border-gold bg-gold/15 shadow-glow ring-1 ring-gold'
+									: strike.atTheMoney
+										? 'border-gold-dim/60 bg-zinc-50 hover:border-gold dark:bg-felt-800'
+										: 'border-zinc-200 bg-zinc-50 hover:border-gold-dim dark:border-felt-700 dark:bg-felt-800'} {chipsEnabled
+									? ''
+									: 'cursor-not-allowed'}"
+								aria-pressed={isSelected}
+								aria-label="{formatNC(Math.round(strike.target))} PE"
+								disabled={!chipsEnabled}
+								on:click={() => pick(strike)}
+							>
+								<span class="num text-sm font-semibold text-down">
+									{formatNC(Math.round(strike.target))} PE
+									{strike.atTheMoney ? '· ATM' : ''}
+								</span>
+								<span class="num text-[10px] text-zinc-500 dark:text-zinc-500">
+									{fmtSigned(-strike.deltaPoints)} ·
+									<span
+										class="text-gold-dim"
+										title="Exact hit pays {strike.odds}× — nearby pays proportionally less"
+										>up to {strike.odds}×</span
+									></span
+								>
+							</button>
+						{/each}
+					</div>
+				</div>
 			</div>
 
 			<!-- ── stake row ───────────────────────────────────────────────────────── -->
@@ -495,7 +600,6 @@
 	mode={editing ? 'edit' : 'place'}
 	{label}
 	targetKind={effective?.targetKind ?? 'up'}
-	deltaPoints={effective?.deltaPoints ?? 0}
 	target={effective?.target ?? 0}
 	prevClose={anchor}
 	stake={stakeSafe}

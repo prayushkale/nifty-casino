@@ -19,7 +19,6 @@
 	export let mode: 'place' | 'edit' = 'place';
 	export let label: string;
 	export let targetKind: 'up' | 'down';
-	export let deltaPoints: number;
 	export let target: number;
 	export let prevClose: number | null = null;
 	export let stake: number;
@@ -33,7 +32,6 @@
 
 	$: potential = payoutFor('hit', stake, odds);
 
-	const arrow = (kind: 'up' | 'down'): string => (kind === 'up' ? '▲' : '▼');
 	const level = (n: number): string => formatNC(Math.round(n));
 
 	function onKeydown(event: KeyboardEvent): void {
@@ -71,15 +69,15 @@
 			<dl class="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
 				<div>
 					<dt class="text-[11px] uppercase tracking-wide text-zinc-500 dark:text-zinc-500">
-						The call
+						Your strike
 					</dt>
 					<dd
 						class="num font-semibold {targetKind === 'up'
 							? 'text-emerald-600 dark:text-up'
 							: 'text-rose-600 dark:text-down'}"
 					>
-						{arrow(targetKind)}
-						{targetKind === 'up' ? '+' : '−'}{formatNC(deltaPoints)}
+						{level(target)}
+						{targetKind === 'up' ? 'CE' : 'PE'}
 					</dd>
 				</div>
 				<div>

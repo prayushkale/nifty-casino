@@ -123,6 +123,8 @@ async function seedTwoBets(): Promise<void> {
 	await placeBet(USER, {
 		underlying: 'sensex',
 		targetKind: 'down',
+		// 81,750 PE: a real PE distance off the 82,000 anchor (300 is not — the
+		// strikes are round 150-multiples, so the distances sit 50/100 mod 150).
 		deltaPoints: 250,
 		stake: 300
 	});
@@ -173,7 +175,7 @@ describe('GET /api/state (anonymous)', () => {
 		// The ladder is the whole reason the page can render before anything happens.
 		expect(body.ladder.tradeDate).toBe(DAY);
 		expect(body.ladder.anchors).toEqual(ANCHORS);
-		expect(body.ladder.options).toHaveLength(24);
+		expect(body.ladder.options).toHaveLength(94);
 	});
 
 	it('creates nothing: a day nobody has touched reads as a missing session, not a new row', async () => {

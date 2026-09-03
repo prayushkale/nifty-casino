@@ -164,7 +164,11 @@ function resolveOptions(options: BetCallOptions = {}): ResolvedOptions {
 	return {
 		now: options.now ?? new Date(),
 		store: options.store ?? getStore(),
-		live: options.live ?? {}
+		// Default to the hermetic DB-only ladder. The HTTP routes pass real live
+		// deps explicitly; unit tests that omit `live` must stay deterministic and
+		// network-free — a live LTP anchor would move the strike distances under
+		// their feet.
+		live: options.live ?? false
 	};
 }
 
@@ -182,10 +186,18 @@ function assertTargetKind(value: unknown): TargetKind {
 	throw new BetError('INVALID_TARGET_KIND', 'Direction must be "up" or "down".');
 }
 
-/** Steps are whole index points; a fractional or signed step is not on the ladder. */
+/**
+ * The distance from the anchor to the picked strike. Strikes are ROUND multiples
+ * of the index spacing, so off a fractional anchor the distance carries up to two
+ * decimals (24,900 CE off an anchor of 24,873 → 27). Signed or zero distances are
+ * not on the ladder.
+ */
 function assertDeltaPoints(value: unknown): number {
-	if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
-	throw new BetError('INVALID_TARGET', 'Target must be a positive whole number of points.');
+	if (typeof value === 'number' && Number.isFinite(value)) {
+		const quantized = Math.round(value * 100) / 100;
+		if (quantized > 0 && Math.abs(quantized - value) < 1e-9) return quantized;
+	}
+	throw new BetError('INVALID_TARGET', 'Target must be a positive number of points.');
 }
 
 function assertStake(value: unknown): number {

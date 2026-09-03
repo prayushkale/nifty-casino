@@ -19,10 +19,11 @@ export type LadderTargetKind = 'up' | 'down';
 /**
  * One selectable rung of a day's ladder.
  *
- * `target` is the absolute level the index must close at — anchor ± deltaPoints,
- * rounded to 2dp — while `deltaPoints` is the round-number move the user picked.
- * `odds` is the multiplier paid on a HIT; it is copied from the static config and
- * is the ONLY source of odds in the app (never the client).
+ * `target` is the absolute level (the STRIKE) the player expects the index to
+ * close at — anchor ± deltaPoints, rounded to 2dp — while `deltaPoints` is the
+ * strike's distance from the anchor. `odds` is the multiplier paid on a HIT
+ * (MAX_HIT_ODDS for every strike); it is resolved server-side and is the ONLY
+ * source of odds in the app (never the client).
  */
 export type LadderOption = {
 	underlying: LadderUnderlying;
