@@ -61,6 +61,36 @@ export function ticksToChartPoints(ticks: readonly CasPoint[]): ChartPoint[] {
 }
 
 /**
+ * Collapse a CAS price path so each distinct price level is drawn at most once —
+ * at its FIRST-seen time — instead of re-drawing every flat tick (which stacks
+ * identical dots during a hold). The very latest tick is always kept as the
+ * terminal point, so the current price stays pinned at the line's
+ * `lastValueVisible` marker: a staircase whose body is one dot per move and
+ * whose head reads the latest price.
+ *
+ * Exact-price dedupe, not epsilon: a 12.40 → 12.35 wiggle is a real move and
+ * must not be swallowed; only genuine holds collapse. A return to an earlier
+ * level is drawn again at its later time, which is how a two-way move reads.
+ */
+export function collapseLevels(points: readonly ChartPoint[]): ChartPoint[] {
+	const out: ChartPoint[] = [];
+	const seen = new Set<number>();
+	for (const point of points) {
+		if (seen.has(point.value)) continue;
+		seen.add(point.value);
+		out.push(point);
+	}
+	// Always keep the latest tick visible: if the collapsed head does not carry
+	// the latest price (a return to an earlier level), re-draw that latest point
+	// as the terminal dot so the line's head reads the current price. If it
+	// already does (all-flat, or a plain advancing move), appending a same-price
+	// dot would just re-introduce the duplicate we collapsed away.
+	const last = points[points.length - 1];
+	if (last && out[out.length - 1].value !== last.value) out.push(last);
+	return out;
+}
+
+/**
  * Which way the day has moved, judged the way the game judges it: the newest
  * indicative against the previous day's official close (PLAN §0 "Anchor"). This
  * picks the line colour, so it is a display concern — `computeTier` remains the

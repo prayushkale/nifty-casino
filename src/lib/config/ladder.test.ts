@@ -68,23 +68,41 @@ describe('ladderStrikesForAnchor', () => {
 
 		// 3% of 82,000 = 2,460 → strikes 79,550 … 84,450. The anchor is NOT a
 		// 150-multiple, so the first CE strike is 82,200 (+200) and the first PE
-		// strike is 81,900 (−100): round levels, unround distances.
+		// strike is 81,900 (−100): round levels, unround distances. 82,050 (+50)
+		// also exists inside the dead zone and is now offered (exact-nearest rule).
 		const sensex = ladderStrikesForAnchor(82_000, 'sensex');
-		expect(sensex.up).toHaveLength(16);
-		expect(sensex.up[0]).toBe(200);
+		expect(sensex.up).toHaveLength(17);
+		expect(sensex.up[0]).toBe(50);
 		expect(sensex.up[sensex.up.length - 1]).toBe(2_450); // strike 84,450
 		expect(sensex.down).toHaveLength(16);
 		expect(sensex.down[0]).toBe(100); // strike 81,900
 		expect(sensex.down[sensex.down.length - 1]).toBe(2_350); // strike 79,650
 	});
 
-	it('never offers a strike inside the dead zone — that strike would be a trap', () => {
-		// sensex's first CE strike off 82,000 is 82,050, only 50 pts away — inside
-		// the 75-pt dead zone (|Δ| < 75 refunds everyone). It must not be offered.
-		const sensex = ladderStrikesForAnchor(82_000, 'sensex');
-		expect(sensex.up).not.toContain(50);
-		// The mirrored PE strike at −100 clears the zone and survives.
-		expect(sensex.down).toContain(100);
+	it('offers the exact strike nearest the anchor on BOTH sides — even inside the dead zone', () => {
+		// Anchor 23,898, nifty 50-spacing: the round strike 23,900 sits just 2 pts
+		// above the anchor (inside the 25-pt dead zone) and 23,850 is 48 pts below
+		// it. Both must be offered — the near one is a real, winnable call under
+		// tier's exact-nearest-strike rule, not a flat trap. (Regression: this was
+		// the reported bug — CE started at 23,950 and PE at 23,850, skipping
+		// 23,900 CE entirely.)
+		const strikes = ladderStrikesForAnchor(23_898, 'nifty');
+		expect(strikes.up).toContain(2); // strike 23,900 CE
+		expect(strikes.up[0]).toBe(2);
+		expect(strikes.down).toContain(48); // strike 23,850 PE — nearest PE level
+		expect(strikes.down[0]).toBe(48);
+	});
+
+	it('offers every round level from the spacing multiple nearest the anchor upward', () => {
+		// The chain is contiguous from the anchor outward on each side: every
+		// level from the anchor's nearest spacing multiple to the band edge.
+		const strikes = ladderStrikesForAnchor(23_898, 'nifty');
+		expect(strikes.up).toEqual([
+			2, 52, 102, 152, 202, 252, 302, 352, 402, 452, 502, 552, 602, 652, 702
+		]);
+		expect(strikes.down).toEqual([
+			48, 98, 148, 198, 248, 298, 348, 398, 448, 498, 548, 598, 648, 698
+		]);
 	});
 
 	it('never offers a strike beyond the band — a small anchor truncates the chain', () => {
@@ -140,7 +158,10 @@ describe('generateLadderOptions', () => {
 
 	it('prices every strike at MAX_HIT_ODDS (the only odds source in the app)', () => {
 		const options = generateLadderOptions(LAUNCH_ANCHORS);
-		expect(options.length).toBe(30 + 32 + 32);
+		// nifty 30, banknifty 32 (its anchor is a 100-multiple, no extra near
+		// level), sensex 33 (anchor 82,000 now offers the +50 in-zone near level):
+		// 30 + 32 + 33 = 95.
+		expect(options.length).toBe(30 + 32 + 33);
 		for (const option of options) expect(option.odds).toBe(MAX_HIT_ODDS);
 	});
 
@@ -154,13 +175,16 @@ describe('generateLadderOptions', () => {
 		const ce = options.find((o) => o.targetKind === 'up' && o.target === 24_900);
 		expect(ce).toBeDefined();
 		expect(ce?.deltaPoints).toBe(26.54);
-		// First PE strike is the round 24,850, only 23.456 pts below the anchor —
-		// inside the 25-pt dead zone, so it is withheld and the chain starts at 24,800.
+		// First PE strike is the round 24,850 — only 23.456 pts below the anchor,
+		// inside the 25-pt dead zone. It IS offered now: the nearest PE level is a
+		// real, winnable call under tier's exact-nearest-strike rule, so the chain
+		// starts at 24,850 rather than skipping to 24,800.
 		const pe = options.find((o) => o.targetKind === 'down' && o.target === 24_850);
-		expect(pe).toBeUndefined();
+		expect(pe).toBeDefined();
+		expect(pe?.deltaPoints).toBe(23.46);
 		const firstPe = options.find((o) => o.targetKind === 'down');
-		expect(firstPe?.target).toBe(24_800);
-		expect(firstPe?.deltaPoints).toBe(73.46);
+		expect(firstPe?.target).toBe(24_850);
+		expect(firstPe?.deltaPoints).toBe(23.46);
 	});
 
 	it('truncates the chain inside the ±3% CAS band (partial clamp)', () => {

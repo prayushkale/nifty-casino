@@ -21,11 +21,17 @@
  *   1. `abstain` — no usable anchor (prevClose missing, ≤ 0 or non-finite). The
  *      engine leaves these bets for a later re-run instead of settling blind;
  *      `abstain` is deliberately NOT a payout tier, it is "do not touch this bet".
- *   2. `flat`    — |Δ| < deadZoneHalfStep(index), STRICTLY less. Checked FIRST, so
- *      a do-nothing day refunds everyone whose direction happened to be right by
- *      less than half a step — and also everyone who was wrong by that much. The
- *      boundary itself is not in the dead zone: |Δ| exactly = half a step is a
- *      real move and falls through to the target test.
+ *   2. `flat`    — |Δ| < deadZoneHalfStep(index), STRICTLY less, UNLESS the bet
+ *      is pinned to a strike inside the dead zone (see `isDeadZonePinned`,
+ *      "the exact-nearest-strike rule"). Checked FIRST, so a do-nothing day
+ *      refunds everyone whose direction happened to be right by less than half a
+ *      step — and also everyone who was wrong by that much. The boundary itself
+ *      is not in the dead zone: |Δ| exactly = half a step is a real move and
+ *      falls through to the target test. A dead-zone-pinned bet (a strike closer
+ *      to the anchor than half a step) CANNOT be flat: its exact move is below
+ *      half a step by construction, so the flat tier would swallow its entire
+ *      hit window. It falls through to the target test instead — a real,
+ *      winnable call.
  *   3. `hit`     — the direction is right AND |Δ − signedTarget| ≤ tolerancePts.
  *      The band is inclusive on both edges (a bet "±50 ±15" owns 35 and 65 alike).
  *      A hit is GRADED by accuracy (user-mandated): exact (err 0) pays the full
@@ -37,6 +43,7 @@
  *      outside the band. FULL LOSS, no consolation tier (PLAN §0, user-mandated).
  */
 import { LADDER_CONFIG, deadZoneHalfStep, type LadderUnderlying } from '$lib/config/ladder';
+import { generateLadderStrikes } from '$lib/config/ladder-strikes';
 
 /** Every verdict the engine can reach. Only the first three ever pay out. */
 export type Tier = 'hit' | 'flat' | 'miss' | 'abstain';
@@ -61,6 +68,36 @@ export function signedTargetPoints(bet: TierBet): number {
 }
 
 /**
+ * "The exact-nearest-strike rule": whether a bet is pinned to a strike that sits
+ * INSIDE the settlement dead zone (closer to the anchor than half a step).
+ *
+ * Such a bet cannot be `flat`: its exact move is below half a step by
+ * construction, so the dead zone would swallow the entire hit window and the
+ * strike could never pay. `computeTier` therefore sends a pinned bet straight
+ * to the target test — the CAS close landing exactly on the round strike (or
+ * within tolerance of it) is a HIT, and only a close that moves past it into a
+ * different strike's territory is a miss.
+ *
+ * `generateLadderStrikes` supplies the day's offered levels (the same module
+ * the server validates picks against), and the anchor is the prevClose the
+ * engine settles against, so this never needs the ladder service or a DB read.
+ */
+export function isDeadZonePinned(bet: TierBet, prevClose: number): boolean {
+	if (!Number.isFinite(prevClose) || prevClose <= 0) return false;
+	// Only a strike that actually sits INSIDE the dead zone (closer to the anchor
+	// than half a step) is pinned. A normal strike at/outside half a step is never
+	// pinned — it can and must still refund on a do-nothing day.
+	const halfStep = deadZoneHalfStep(bet.underlying);
+	if (!(bet.deltaPoints < halfStep)) return false;
+	// And only an OFFERED strike is pinned: the board never offers a level it
+	// cannot pay, so the only way a bet can be here is the nearest offered round
+	// level on its side.
+	const ladder = generateLadderStrikes(prevClose, bet.underlying);
+	const offered = bet.targetKind === 'up' ? ladder.up : ladder.down;
+	return offered.includes(bet.deltaPoints);
+}
+
+/**
  * The verdict for one bet against one (prevClose, close) pair. Infallible and
  * total: an unusable anchor is an `abstain`, never an exception, because a day
  * with one bad index must still settle the other two.
@@ -76,8 +113,13 @@ export function computeTier(bet: TierBet, prevClose: number, close: number): Tie
 	const delta = close - prevClose;
 	if (!Number.isFinite(delta)) return 'abstain';
 
-	// 2. Dead zone first — it outranks direction and the target band.
-	if (Math.abs(delta) < deadZoneHalfStep(bet.underlying)) return 'flat';
+	// 2. Dead zone first — it outranks direction and the target band. The one
+	// exception is a bet pinned to a strike inside the zone (see
+	// `isDeadZonePinned`): that strike's exact move is below half a step, so the
+	// zone would swallow its whole hit window and it could never pay.
+	if (Math.abs(delta) < deadZoneHalfStep(bet.underlying) && !isDeadZonePinned(bet, prevClose)) {
+		return 'flat';
+	}
 
 	// 3. HIT: right direction, inside the inclusive tolerance band.
 	const target = signedTargetPoints(bet);

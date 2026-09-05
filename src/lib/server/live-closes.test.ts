@@ -142,7 +142,7 @@ describe('the reported bug: empty DB, logged-in player', () => {
 			banknifty: BANK_CLOSE,
 			sensex: SENSEX_CLOSE
 		});
-		expect(ladder.options).toHaveLength(94);
+		expect(ladder.options).toHaveLength(95);
 	});
 
 	it('the state payload carries bettable ladders instead of an empty card', async () => {
@@ -156,7 +156,7 @@ describe('the reported bug: empty DB, logged-in player', () => {
 		});
 		expect(payload.user?.handle).toBe('meera');
 		expect(payload.ladder.anchors.nifty).toBe(NIFTY_CLOSE);
-		expect(payload.ladder.options).toHaveLength(94);
+		expect(payload.ladder.options).toHaveLength(95);
 	});
 
 	it('a rung the player could SEE is a rung they can BET', async () => {

@@ -803,6 +803,18 @@ function createRepos(sql: SqlClient): TxStore {
 				order by ts asc
 				limit ${limit}`;
 			return rows.map(mapTick);
+		},
+		// The static board: the newest calendar day that actually has tick rows,
+		// never newer than `cutoff` (today, normally). `cas_ticks` is
+		// partitioned by trade_date and the day column is indexed, so a MAX
+		// scan touches one partition boundary, not the whole table.
+		latestCasTradeDate: async (cutoff) => {
+			const rows = cutoff
+				? await sql`select max(trade_date) as trade_date from cas_ticks
+					where trade_date <= ${cutoff}`
+				: await sql`select max(trade_date) as trade_date from cas_ticks`;
+			const value = rows[0]?.trade_date;
+			return value ? toDateStr(value) : null;
 		}
 	};
 

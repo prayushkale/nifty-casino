@@ -634,6 +634,35 @@ describe('MemoryStore', () => {
 		it('accepts an empty batch as a no-op', async () => {
 			expect(await store.ticks.insertCasTicks([])).toBe(0);
 		});
+
+		it('latestCasTradeDate returns the newest day with ticks, honoring a cutoff', async () => {
+			// The beforeEach day (DATE) is present; add an older and a newer day.
+			await store.ticks.insertCasTicks([
+				{
+					tradeDate: '2026-08-25',
+					underlying: 'nifty',
+					ts: 1000,
+					value: 1,
+					changePts: 0,
+					changePct: 0
+				},
+				{
+					tradeDate: '2026-08-28',
+					underlying: 'sensex',
+					ts: 1000,
+					value: 1,
+					changePts: 0,
+					changePct: 0
+				}
+			]);
+			expect(await store.ticks.latestCasTradeDate('2026-08-29')).toBe('2026-08-28');
+			// A cutoff earlier than the newest day keeps the newest NOT after it.
+			expect(await store.ticks.latestCasTradeDate('2026-08-27')).toBe(DATE);
+			// No cutoff: the newest of everything.
+			expect(await store.ticks.latestCasTradeDate()).toBe('2026-08-28');
+			// A cutoff before any tick row: null.
+			expect(await store.ticks.latestCasTradeDate('2026-01-01')).toBeNull();
+		});
 	});
 
 	// --------------------------------------------------------------- closes

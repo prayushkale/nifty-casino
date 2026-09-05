@@ -12,7 +12,14 @@
  */
 import { describe, expect, it } from 'vitest';
 import { MAX_HIT_ODDS, LADDER_CONFIG, type LadderUnderlying } from '$lib/config/ladder';
-import { computeTier, hitAccuracy, payoutFor, signedTargetPoints, type TierBet } from './tier';
+import {
+	computeTier,
+	hitAccuracy,
+	isDeadZonePinned,
+	payoutFor,
+	signedTargetPoints,
+	type TierBet
+} from './tier';
 
 const PREV = 25_000;
 const CLOSES: Record<LadderUnderlying, number> = {
@@ -111,6 +118,57 @@ describe('computeTier — the dead zone is checked first, and strictly', () => {
 		// the point of the assertion is that it is NOT a flat.
 		expect(up(underlying, step, halfStep)).toBe('miss');
 		expect(up(underlying, step, -halfStep)).toBe('miss');
+	});
+});
+
+describe('computeTier — dead-zone-exact strikes (the exact-nearest-strike rule)', () => {
+	it('a strike inside the dead zone whose exact level the close hits is a HIT, not a flat', () => {
+		// Anchor 23,898 (nifty): the 23,900 strike is 2 pts above the anchor —
+		// inside the 25-pt dead zone. A close AT 23,900 is an exact hit.
+		expect(
+			computeTier({ underlying: 'nifty', targetKind: 'up', deltaPoints: 2 }, 23_898, 23_900)
+		).toBe('hit');
+		// And the mirror PE: 23,850 is 48 below (inside the zone? no — 48 > 25, so
+		// this is NOT pinned and a 0-move close is flat).
+		expect(
+			computeTier({ underlying: 'nifty', targetKind: 'down', deltaPoints: 48 }, 23_898, 23_898)
+		).toBe('flat');
+	});
+
+	it('a pinned in-zone strike pays the FULL graded accuracy on its exact close', () => {
+		// 23,900 CE at anchor 23,898 — exact close, exact hit.
+		expect(
+			hitAccuracy({ underlying: 'nifty', targetKind: 'up', deltaPoints: 2 }, 23_898, 23_900)
+		).toBe(1);
+		// A close a couple points off still grades: 23,905 is 5 pts from 23,900 → err 5, tol 15 → 2/3.
+		expect(
+			hitAccuracy({ underlying: 'nifty', targetKind: 'up', deltaPoints: 2 }, 23_898, 23_905)
+		).toBeCloseTo(1 - 5 / 15, 10);
+	});
+
+	it('a pinned in-zone strike on the wrong side of a do-nothing close is a miss (not a flat refund)', () => {
+		// 23,900 CE (2 pts above) but the close lands BELOW the anchor (23,890): the
+		// dead zone would have refunded a normal bet; a pinned one must not — it
+		// called the market up and the market did not move that way.
+		expect(
+			computeTier({ underlying: 'nifty', targetKind: 'up', deltaPoints: 2 }, 23_898, 23_890)
+		).toBe('miss');
+		// 23,850 PE (48 below) — NOT pinned, so a wrong-direction do-nothing close
+		// still refunds.
+		expect(
+			computeTier({ underlying: 'nifty', targetKind: 'down', deltaPoints: 48 }, 23_898, 23_900)
+		).toBe('flat');
+	});
+
+	it('isDeadZonePinned is true only for an offered strike INSIDE the dead zone', () => {
+		const niftyUp2 = { underlying: 'nifty' as const, targetKind: 'up' as const, deltaPoints: 2 };
+		expect(isDeadZonePinned(niftyUp2, 23_898)).toBe(true);
+		// A normal +50 strike is not pinned — it must still refund on a flat day.
+		expect(isDeadZonePinned({ ...niftyUp2, deltaPoints: 50 }, 23_898)).toBe(false);
+		// A non-offered in-zone level (e.g. +10, no round strike there) is not pinned.
+		expect(isDeadZonePinned({ ...niftyUp2, deltaPoints: 10 }, 23_898)).toBe(false);
+		// A meaningless anchor is never pinned.
+		expect(isDeadZonePinned(niftyUp2, 0)).toBe(false);
 	});
 });
 

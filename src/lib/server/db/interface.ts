@@ -445,6 +445,14 @@ export type TickRepo = {
 		toTs: number,
 		limit: number
 	): Promise<CasTickRow[]>;
+	/**
+	 * The newest calendar day (<= `cutoff`, 'YYYY-MM-DD') that actually holds a
+	 * tick row. Default-inspection for the board while the market is closed:
+	 * on a weekend, holiday or pre-9:15 morning the chart should keep showing
+	 * the most recent trading day's movement, not today's (empty) line.
+	 * `null` when no ticks exist at all up to the cutoff.
+	 */
+	latestCasTradeDate(cutoff?: string): Promise<string | null>;
 };
 
 export type CloseRepo = {

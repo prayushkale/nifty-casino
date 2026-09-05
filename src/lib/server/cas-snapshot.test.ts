@@ -7,7 +7,7 @@
  * for Postgres, so the merge is exercised against the real repo API.
  */
 import { describe, expect, it } from 'vitest';
-import { istAt, THURSDAY, WEDNESDAY } from './cas/test-clock';
+import { istAt, SATURDAY, THURSDAY, WEDNESDAY } from './cas/test-clock';
 import { CasStore } from './cas-store';
 import type { CasTickPayload, Underlying } from './cas/types';
 import { MemoryStore } from './db';
@@ -278,15 +278,68 @@ describe('buildCasSnapshot — past-day replay (?date=)', () => {
 	});
 });
 
+describe('the served trade date — weekend / closed-market replay', () => {
+	it('serves the last trading day’s full movement on a Saturday', async () => {
+		const store = await seededStore([
+			...minuteOfTicks(0, 24000),
+			...minuteOfTicks(1, 24015),
+			...minuteOfTicks(2, 24030)
+		]);
+		const hot = new CasStore();
+		// The hot store holds nothing for Saturday (it only ever holds `now`’s date).
+		const snapshot = await buildCasSnapshot({
+			store,
+			hot,
+			now: new Date(istAt(SATURDAY, 12, 0, 0))
+		});
+		expect(snapshot.tradeDate).toBe(DAY); // Wednesday, not Saturday
+		expect(snapshot.ticks.nifty).toHaveLength(45);
+		expect(snapshot.stale).toBe(false);
+	});
+
+	it('serves the last trading day before 09:15 on a Monday morning', async () => {
+		const store = await seededStore(minuteOfTicks(0, 24000));
+		const hot = new CasStore();
+		// The Monday after the fixed Wednesday — the market is not open yet.
+		const monday = '2026-08-31';
+		const snapshot = await buildCasSnapshot({
+			store,
+			hot,
+			now: new Date(istAt(monday, 9, 14, 0))
+		});
+		expect(snapshot.tradeDate).toBe(DAY);
+		expect(snapshot.ticks.nifty).toHaveLength(15);
+	});
+
+	it('yields to the new day’s own (empty) board once it opens at 09:15', async () => {
+		const store = await seededStore(minuteOfTicks(0, 24000));
+		const hot = new CasStore();
+		// Same Monday, but a minute after the market opens: the board is the new
+		// day’s, even though it has no ticks yet.
+		const monday = '2026-08-31';
+		const snapshot = await buildCasSnapshot({
+			store,
+			hot,
+			now: new Date(istAt(monday, 9, 15, 0))
+		});
+		expect(snapshot.tradeDate).toBe(monday);
+		expect(snapshot.ticks.nifty).toHaveLength(0);
+	});
+});
+
 describe('the served trade date', () => {
-	it('uses the hot store for today even when the archive has today’s rows too', async () => {
+	it('overlays the hot tail on the full archived day for a full snapshot (no cursor)', async () => {
+		// The archive holds the whole morning; RAM holds the last three polls.
 		const store = await seededStore(minuteOfTicks(0, 24000));
 		const hot = new CasStore();
 		hot.ingest([payload(istAt(DAY, 15, 14), 25000)], NOW);
 
-		// no cursor: RAM is authoritative for the hot tail, no DB read needed
+		// no cursor: the server always merges the archived day with the hot tail,
+		// so a board that has been open through the live session stays complete
+		// even after the ring buffer trims its head.
 		const snapshot = await buildCasSnapshot({ store, hot, now: NOW });
-		expect(snapshot.ticks.nifty).toHaveLength(1);
+		expect(snapshot.ticks.nifty).toHaveLength(15 + 1);
+		expect(snapshot.ticks.nifty[0]?.value).toBe(24000); // earliest archived tick survives
 		expect(snapshot.bufferedFrom).toBe(istAt(DAY, 15, 14));
 	});
 

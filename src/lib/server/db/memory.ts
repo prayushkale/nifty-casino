@@ -547,7 +547,16 @@ export class MemoryStore implements GameStore {
 		getCasTicksRange: async (tradeDate, underlying, fromTs, toTs, limit) =>
 			(this.ticksByKey.get(tickKey(tradeDate, underlying)) ?? [])
 				.filter((t) => t.ts >= fromTs && t.ts < toTs) // [fromTs, toTs)
-				.slice(0, Math.max(0, limit))
+				.slice(0, Math.max(0, limit)),
+		latestCasTradeDate: async (cutoff) => {
+			let newest: string | null = null;
+			for (const key of this.ticksByKey.keys()) {
+				const date = key.split('|')[0] ?? '';
+				if (cutoff !== undefined && date > cutoff) continue;
+				if (newest === null || date > newest) newest = date;
+			}
+			return newest;
+		}
 	};
 
 	private readonly closeRepo: CloseRepo = {
