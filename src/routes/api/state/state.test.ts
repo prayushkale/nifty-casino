@@ -175,7 +175,7 @@ describe('GET /api/state (anonymous)', () => {
 		// The ladder is the whole reason the page can render before anything happens.
 		expect(body.ladder.tradeDate).toBe(DAY);
 		expect(body.ladder.anchors).toEqual(ANCHORS);
-		expect(body.ladder.options).toHaveLength(94);
+		expect(body.ladder.options).toHaveLength(95);
 	});
 
 	it('creates nothing: a day nobody has touched reads as a missing session, not a new row', async () => {

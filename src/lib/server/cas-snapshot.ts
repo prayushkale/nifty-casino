@@ -9,10 +9,24 @@
  * line, and a server that restarted mid-auction (empty RAM, full DB) still
  * serves a complete chart.
  *
+ * WHICH DAY: the board shows the most recent trading day's cash-session
+ * movement while the market is closed — over a weekend, a trading holiday and
+ * the pre-open morning — so a Saturday or Sunday visitor still sees Friday's
+ * (or the last trading day's) 15:13–15:42 line. Only after the next trading
+ * day opens at 09:15 IST does the board yield to the new day's (empty,
+ * awaiting) line.
+ *
  * Pure-ish by design: the merge/cap/staleness maths are exported for tests, and
  * the only I/O is the `TickRepo`/`CloseRepo` reads the caller hands in.
  */
-import { istDateStrToMidnightUtcMs } from '$lib/time/ist';
+import {
+	hmsToSeconds,
+	isWeekend,
+	istDateStr,
+	istDateStrToMidnightUtcMs,
+	secOfDayIst
+} from '$lib/time/ist';
+import { MARKET_OPEN_HMS } from '$lib/config/app';
 import type { CasTick } from './cas/cas-series';
 import type { CasLatest, CasSnapshot, CasStore } from './cas-store';
 import { CAS_UNDERLYINGS, isCasStale } from './cas-store';
@@ -80,19 +94,44 @@ export type CasSnapshotRequest = {
 };
 
 /**
+ * Which trading day's line a visitor should see at `now`.
+ *
+ * A weekday after the market opens (09:15 IST) is that day's own board — empty
+ * until its 15:13:30 CAS window — even if it currently has no ticks. Weekends,
+ * trading holidays and the pre-open morning keep showing the most recent
+ * trading day with actual tick rows, so Friday's movement survives Saturday,
+ * Sunday and the pre-open stretch of Monday.
+ *
+ * `latestCasTradeDate` (a MAX over the `cas_ticks` partition, never newer than
+ * today) is the ground truth for "the last day we have data".
+ */
+async function effectiveTradeDate(store: GameStore, now: Date): Promise<string> {
+	const calendarToday = istDateStr(now);
+	if (!isWeekend(calendarToday) && secOfDayIst(now) >= hmsToSeconds(MARKET_OPEN_HMS)) {
+		return calendarToday;
+	}
+	const latest = await store.ticks.latestCasTradeDate(calendarToday);
+	return latest ?? calendarToday;
+}
+
+/**
  * Build the `/api/cas/all` payload: the hot snapshot for today, plus a
  * `cas_ticks` backfill whenever the requested window reaches past what RAM
- * still holds (or RAM is empty — the mid-auction restart case).
+ * still holds (or RAM is empty — the mid-auction restart case, and every
+ * weekend/holiday/pre-open replay of the last trading day).
  */
 export async function buildCasSnapshot(req: CasSnapshotRequest): Promise<CasAllResponse> {
 	const now = req.now ?? new Date();
 	const cap = req.cap ?? MAX_SNAPSHOT_TICKS;
-	const today = req.hot.snapshot(undefined, now).tradeDate;
-	const tradeDate = req.date ?? today;
-	const isToday = tradeDate === today;
+	const calendarToday = req.hot.snapshot(undefined, now).tradeDate;
+	// An explicit `?date=` (history replay) always wins; otherwise show the most
+	// recent trading day until the next one opens.
+	const tradeDate = req.date ?? (await effectiveTradeDate(req.store, now));
+	const isToday = tradeDate === calendarToday;
 	const since = req.since ?? null;
 
-	// The hot store only ever holds `now`'s IST date; a past day is DB-only replay.
+	// The hot store only ever holds `now`'s IST date; a past-day replay (a
+	// weekend showing Friday) has nothing in RAM and goes straight to the DB.
 	const hotSnapshot: CasSnapshot | null = isToday
 		? req.hot.snapshot(since ?? undefined, now)
 		: null;
@@ -107,7 +146,6 @@ export async function buildCasSnapshot(req: CasSnapshotRequest): Promise<CasAllR
 			underlying,
 			since,
 			horizon: hotSnapshot?.bufferedFrom ?? null,
-			hotEmpty: hotTicks.length === 0,
 			now,
 			cap
 		});
@@ -148,16 +186,15 @@ async function backfillRows(
 		underlying: Underlying;
 		since: number | null;
 		horizon: number | null;
-		hotEmpty: boolean;
 		now: Date;
 		cap: number;
 	}
 ): Promise<{ rows: CasTickRow[]; truncated: boolean }> {
-	const { tradeDate, underlying, since, horizon, hotEmpty, now, cap } = opts;
+	const { tradeDate, underlying, since, horizon, now, cap } = opts;
 
 	let fromTs: number;
 	let toTs: number;
-	if (!hotEmpty && horizon !== null && since !== null && since >= horizon) {
+	if (since !== null && horizon !== null && since >= horizon) {
 		return { rows: [], truncated: false }; // RAM covers [since, now]
 	}
 	if (since !== null) {
@@ -167,13 +204,15 @@ async function backfillRows(
 		fromTs = since + 1;
 		// RAM (when it holds anything) owns everything from the horizon onward.
 		toTs = horizon ?? now.getTime() + 1;
-	} else if (hotEmpty) {
-		// Nothing buffered at all (server restart, or a past-day replay): the DB is
-		// the only record, so start at the IST midnight of the day being served.
+	} else {
+		// A full snapshot (no cursor): always read the whole archived day from the
+		// DB, then overlay the hot tail on it. This is what keeps a board that has
+		// been open through the whole live session complete after the day is over —
+		// the ring buffer trims its head during 30 minutes of 2s polling, so a
+		// refresh that only served RAM would silently drop the first stretch of the
+		// movement. The same path serves every past-day/weekend replay.
 		fromTs = istDateStrToMidnightUtcMs(tradeDate);
 		toTs = now.getTime() + 1;
-	} else {
-		return { rows: [], truncated: false };
 	}
 
 	// toTs must be strictly after fromTs for a non-empty window.

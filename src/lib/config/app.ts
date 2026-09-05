@@ -7,6 +7,14 @@
 export const APP_TIMEZONE_OFFSET_MIN = 330;
 
 /**
+ * The regular-session market open, IST. The board keeps displaying the most
+ * recent trading day's cash-session movement (over a weekend, a holiday, and
+ * the pre-open morning) UNTIL this instant of the next trading day — after
+ * 09:15 the previous day's line is superseded by the new day's (empty) board.
+ */
+export const MARKET_OPEN_HMS = { h: 9, m: 15, s: 0 } as const;
+
+/**
  * Bet placement OPENS here, IST — 15:15:01, one second after the spot market's
  * last print, because the LTP captured at {@link LTP_ANCHOR_HMS} is the anchor
  * every rung is measured from. Bets before that instant would hang off an anchor

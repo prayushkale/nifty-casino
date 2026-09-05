@@ -65,7 +65,7 @@ describe('getLadderForDate', () => {
 		expect(ladder.tradeDate).toBe(THURSDAY);
 		expect(ladder.anchors).toEqual({ nifty: 25_000, banknifty: 56_000, sensex: 82_000 });
 		expect(ladder.options).toEqual(generateLadderOptions(ladder.anchors));
-		expect(ladder.options).toHaveLength(94);
+		expect(ladder.options).toHaveLength(95);
 		expect(ladder.generatedAt).toBeGreaterThan(0);
 	});
 
@@ -74,7 +74,7 @@ describe('getLadderForDate', () => {
 		const ladder = await getLadderForDate(store, MONDAY);
 
 		expect(ladder.anchors).toEqual(LAUNCH_ANCHORS);
-		expect(ladder.options).toHaveLength(94);
+		expect(ladder.options).toHaveLength(95);
 	});
 
 	it('serves Saturday and Sunday too — nothing bets on them, but the ladder is answerable', async () => {
@@ -84,7 +84,7 @@ describe('getLadderForDate', () => {
 			const ladder = await getLadderForDate(store, weekendDay);
 			// Saturday's walk-back lands on Friday directly; Sunday skips Saturday too.
 			expect(ladder.anchors, weekendDay).toEqual(LAUNCH_ANCHORS);
-			expect(ladder.options, weekendDay).toHaveLength(94);
+			expect(ladder.options, weekendDay).toHaveLength(95);
 		}
 	});
 
@@ -220,7 +220,7 @@ describe('getLadderForDate', () => {
 		for (let day = 10; day < 20; day += 1) {
 			await getLadderForDate(store, `2026-09-${String(day).padStart(2, '0')}`);
 		}
-		expect((await getLadderForDate(store, THURSDAY)).options).toHaveLength(94);
+		expect((await getLadderForDate(store, THURSDAY)).options).toHaveLength(95);
 	});
 });
 
@@ -229,7 +229,7 @@ describe('resolveLadderOption', () => {
 		const store = await ladderStore(THURSDAY, WEDNESDAY);
 		const { options } = await getLadderForDate(store, THURSDAY);
 
-		expect(options).toHaveLength(94);
+		expect(options).toHaveLength(95);
 		for (const option of options) {
 			const resolved = await resolveLadderOption(
 				THURSDAY,

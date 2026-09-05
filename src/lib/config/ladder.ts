@@ -48,6 +48,11 @@
  * read it.
  */
 import type { LadderOption, LadderTargetKind, LadderUnderlying } from './ladder.types';
+import { generateLadderStrikes, type LadderStrikes, round2 } from './ladder-strikes';
+// ^ `ladder-strikes` is the single implementation of the pure round-strike
+//   generator; this module re-exports it so `$lib/config/ladder` stays the
+//   config API, and `$lib/game/tier` imports the same generator for the
+//   exact-nearest-strike settlement rule without pulling in the full ladder.
 
 export type {
 	LadderForDate,
@@ -116,9 +121,8 @@ export function isStepWithinCasBand(anchor: number, step: number): boolean {
 }
 
 /** Round to 2dp — index levels are quoted to two decimals, never more. */
-export function round2(n: number): number {
-	return Math.round(n * 100) / 100;
-}
+export { round2 } from './ladder-strikes';
+// ^ re-export keeps the historical `$lib/config/ladder` import path working.
 
 /**
  * The round STRIKE levels of one index for one anchor — like NSE's option chain.
@@ -130,49 +134,20 @@ export function round2(n: number): number {
  * spacing offers CE strikes 24,900 … (distances 27, 77, 127 …) and PE strikes
  * 24,850 … (distances 23, 73 …) — the strikes are round, the distances need not
  * be.
+ *
+ * Note: the nearest offered level per side may sit INSIDE the settlement dead
+ * zone (|Δ| < halfStep refunds) when the anchor is not itself a round level —
+ * that is not a trap because `tier.ts`'s `isDeadZonePinned` makes such a bet a
+ * real, winnable call instead of a flat (see `src/lib/game/tier.ts`).
  */
-export type LadderStrikes = {
-	/** CE distances (strike − anchor), ascending — every strike above the anchor. */
-	up: number[];
-	/** PE distances (anchor − strike), ascending — every strike below the anchor. */
-	down: number[];
-};
+export type { LadderStrikes } from './ladder-strikes';
 
-/**
- * Strikes closer to the anchor than half a step sit inside the settlement dead
- * zone (|Δ| < halfStep is a flat refund): a hit there could only ever land at
- * accuracy ≤ 1 − halfStep/tolerance, so the strike would be a trap. They are not
- * offered. On a spacing multiple the nearest strikes sit exactly one spacing out,
- * which already clears the zone; off a fractional anchor the exclusion only ever
- * bites the side whose nearest round strike falls inside it.
- */
-
+/** @see generateLadderStrikes — the pure generator, kept here for the config API. */
 export function ladderStrikesForAnchor(
 	anchor: number,
 	underlying: LadderUnderlying
 ): LadderStrikes {
-	if (!Number.isFinite(anchor) || anchor <= 0) return { up: [], down: [] };
-	const band = (anchor * CAS_BAND_PCT) / 100;
-	const spacing = LADDER_CONFIG[underlying].stepSpacing;
-	const first = Math.ceil((anchor - band) / spacing);
-	const last = Math.floor((anchor + band) / spacing);
-	const up: number[] = [];
-	const down: number[] = [];
-	const deadZone = deadZoneHalfStep(underlying);
-	for (let k = first; k <= last; k++) {
-		const level = k * spacing;
-		if (level > anchor) {
-			const dist = round2(level - anchor);
-			if (dist > deadZone) up.push(dist);
-		} else if (level < anchor) {
-			const dist = round2(anchor - level);
-			if (dist > deadZone) down.push(dist);
-		}
-	}
-	// k ascends, so the below-anchor strikes came out far-to-near; the chain reads
-	// nearest-first on both sides.
-	down.reverse();
-	return { up, down };
+	return generateLadderStrikes(anchor, underlying);
 }
 
 /**
@@ -182,7 +157,9 @@ export function ladderStrikesForAnchor(
  * non-finite — the usual state before the feed carries a prevClose) simply yields
  * zero strikes for that index. A fully eligible index yields one option per
  * ROUND strike level inside the ±3% CAS band — CE above the anchor, PE below —
- * exactly the strike series an NSE option chain would list.
+ * exactly the strike series an NSE option chain would list. The nearest round
+ * level per side is offered even when it sits inside the settlement dead zone
+ * (`tier.ts`'s `isDeadZonePinned` makes it a payable call, not a flat).
  */
 export function generateLadderOptions(
 	anchors: Readonly<Record<LadderUnderlying, number | null>>

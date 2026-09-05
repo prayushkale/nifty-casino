@@ -17,6 +17,7 @@ import {
 	istTickLabel,
 	istWallClock,
 	ticksToChartPoints,
+	collapseLevels,
 	type CasPoint
 } from './chart';
 import { APP_TIMEZONE_OFFSET_MIN } from '$lib/config/app';
@@ -83,6 +84,61 @@ describe('ticksToChartPoints — ascending, deduped, library-safe', () => {
 
 	it('returns [] for an empty series, which is what an unstarted auction is', () => {
 		expect(ticksToChartPoints([])).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// collapseLevels — one dot per price level, latest tick always shown
+// ---------------------------------------------------------------------------
+
+describe('collapseLevels — one dot per price level, latest tick always shown', () => {
+	it('keeps each distinct price as a single dot at its first-seen time', () => {
+		const pts = [
+			{ time: 1, value: 25010 },
+			{ time: 2, value: 25010 },
+			{ time: 3, value: 25010 },
+			{ time: 4, value: 25020 },
+			{ time: 5, value: 25020 },
+			{ time: 6, value: 25015 }
+		];
+		const out = collapseLevels(pts);
+		expect(out.map((p) => p.time)).toEqual([1, 4, 6]);
+		expect(out.map((p) => p.value)).toEqual([25010, 25020, 25015]);
+	});
+
+	it('returns [] for an empty path', () => {
+		expect(collapseLevels([])).toEqual([]);
+	});
+
+	it('pins the latest tick even when it returns to an earlier level', () => {
+		const out = collapseLevels([
+			{ time: 1, value: 25010 },
+			{ time: 2, value: 25020 },
+			{ time: 3, value: 25010 } // back to an earlier level
+		]);
+		expect(out.map((p) => p.time)).toEqual([1, 2, 3]);
+		expect(out.map((p) => p.value)).toEqual([25010, 25020, 25010]);
+	});
+
+	it('keeps a single all-flat tick as one point', () => {
+		const out = collapseLevels([
+			{ time: 1, value: 25010 },
+			{ time: 2, value: 25010 }
+		]);
+		expect(out).toHaveLength(1);
+		expect(out[0]).toEqual({ time: 1, value: 25010 });
+	});
+
+	it('never mutates the path it is handed', () => {
+		const pts = [
+			{ time: 1, value: 25010 },
+			{ time: 2, value: 25010 }
+		];
+		collapseLevels(pts);
+		expect(pts).toEqual([
+			{ time: 1, value: 25010 },
+			{ time: 2, value: 25010 }
+		]);
 	});
 });
 

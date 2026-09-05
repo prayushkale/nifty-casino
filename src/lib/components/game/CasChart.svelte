@@ -26,6 +26,7 @@
 		formatIstHms,
 		istTickLabel,
 		ticksToChartPoints,
+		collapseLevels,
 		type CasPoint
 	} from '$lib/game/chart';
 	import { theme } from '$lib/stores/theme';
@@ -136,7 +137,11 @@
 		ltp.ts > 0
 			? [{ time: Math.floor(ltp.ts / 1000) as UTCTimestamp, value: ltp.value }]
 			: [];
-	$: displayPoints = points.length > 0 ? [...anchorPoints, ...points] : anchorPoints;
+	/** The CAS path collapsed to one dot per price level (its first-seen time); the
+	 * LTP anchor is left untouched. Always keeps the latest tick so the current
+	 * price stays on the line at the `lastValueVisible` marker. */
+	$: casPath = collapseLevels(points);
+	$: displayPoints = casPath.length > 0 ? [...anchorPoints, ...casPath] : anchorPoints;
 	$: hasLtpPoint = anchorPoints.length > 0;
 	$: headerValue =
 		latestValue !== null ? latestValue : hasLtpPoint && ltp !== null ? ltp.value : null;
