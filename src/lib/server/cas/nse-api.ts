@@ -142,6 +142,7 @@ async function nseFetchJson(path: string): Promise<unknown> {
 		}
 
 		const contentType = res.headers.get('content-type');
+		logUpstreamCacheHeaders('nse', res);
 		if (contentType?.includes('application/json') && res.ok) return await res.json();
 		const body = await res.text().catch(() => '');
 		// classifyNseFailure only returns null for a usable JSON 200 — excluded above.
@@ -155,6 +156,24 @@ async function nseFetchJson(path: string): Promise<unknown> {
 }
 
 export type NseFetchResult<T> = { data: T; sessionReset: boolean };
+
+/**
+ * Env-gated (`CAS_DEBUG_HEADERS=1`) one-liner of the upstream response headers
+ * that reveal how fresh the CDN's copy is: `Date` (origin time), `Age` (seconds
+ * the edge has cached it — >0 means we are reading a cached payload), and
+ * `Cache-Control` (how long the edge is ALLOWED to cache it). Run one live CAS
+ * session with this on and the "why is the chart 30s behind" question answers
+ * itself from the logs.
+ */
+export function logUpstreamCacheHeaders(label: string, res: Response): void {
+	if ((process.env.CAS_DEBUG_HEADERS ?? '').trim().toLowerCase() !== '1') return;
+	const date = res.headers.get('date');
+	const age = res.headers.get('age');
+	const cc = res.headers.get('cache-control');
+	console.info(
+		`[cas-debug] ${label}: date=${date ?? '—'} age=${age ?? '—'} cache-control=${cc ?? '—'}`
+	);
+}
 
 /**
  * One automatic retry after refreshing the session on AUTH/BLOCKED failures.

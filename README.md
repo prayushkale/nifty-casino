@@ -1,9 +1,15 @@
 # NiftyCasino
 
-A standalone forecasting-game web app: between **15:00–15:20 IST** each trading day, players bet
+A standalone forecasting-game web app: between **15:15–15:20 IST** each trading day, players bet
 **play-money NC chips** on how NIFTY 50, BANKNIFTY and SENSEX will settle in SEBI's
 **Closing Auction Session (CAS)** — with live charts streamed from our server (which does all the
 scraping), automatic settlement against the official close, and a gamified casino-floor UI.
+
+The reference price is the **last traded price (LTP) at 15:15:01 IST** (`index_closes.source =
+'ltp_anchor'`), captured by the poller on its first poll after the spot market stops — not the
+previous day's close. Bets open the moment that anchor is set, the pre-auction screen shows the
+LTP (one load on page open, 30s refreshes from 15:00, one final load at 15:15:01, then static),
+and the cash-session chart draws from 15:20 out of that frozen LTP point.
 
 > **No real money. Entertainment only.** Chips (`NC`) are virtual with zero cash-out.
 
@@ -315,8 +321,8 @@ the checklist below is for.
    `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`; `npm run dev`. The login page must **not** show
    the dev panel now.
 2. **Signup** `/auth/signup` with a handle → lands on `/auth/verify` ("check your inbox").
-3. **Verify** by clicking the emailed link → you are redirected home and the top bar shows your
-   handle.
+3. **Verify** by clicking the emailed link → lands on `/auth/login` with the green
+   "Email verified" banner → logging in takes you home with your handle in the top bar.
 4. **Profile + wallet**: in the DB, `profiles` has your handle, `balance = 1000`, `ledger` has
    one `signup_bonus` row of `+1000` with `balance_after = 1000`, and `user_stats` has a zeroed
    row. Nothing else may have been written.
@@ -337,11 +343,14 @@ the checklist below is for.
 12. **Dev mode on a fresh clone** (env vars removed): the dev panel appears, entering a handle
     mints 1,000 NC + the ledger row in the memory store, and the same handle logs you back in.
 
-> **Email templates.** Supabase's built-in templates link with `{{ .ConfirmationURL }}`, which
-> honours the `emailRedirectTo`/`redirectTo` values above. If you follow the Supabase SSR guides
-> instead and build links from `{{ .TokenHash }}`, point them at
+> **Email templates.** Branded HTML for the two emails Supabase sends lives in
+> `supabase/email-templates/` — paste them into the dashboard per that folder's README. They
+> build links from `{{ .TokenHash }}` and point them at
 > `<site-url>/auth/confirm?token_hash={{ .TokenHash }}&type=signup` (or `type=recovery` for
-> resets) — `/auth/confirm` handles both shapes. If confirmations are switched **off** in the
+> resets) — `/auth/confirm` handles both shapes. A confirmed signup lands on `/auth/login?verified=1`
+> (the "Email verified" banner), not auto-signed-in. Supabase's built-in templates link with
+> `{{ .ConfirmationURL }}`, which honours the `emailRedirectTo`/`redirectTo` values above; that
+> shape also works, just without the branding. If confirmations are switched **off** in the
 > Supabase dashboard, signup returns a live session and the app skips `/auth/verify` entirely.
 
 ## Supabase setup (production auth + Postgres)

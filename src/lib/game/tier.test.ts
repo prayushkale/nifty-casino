@@ -11,7 +11,7 @@
  * change to what players were told they would win — treat it as a money change.
  */
 import { describe, expect, it } from 'vitest';
-import { LADDER_CONFIG, LADDER_UNDERLYINGS, type LadderUnderlying } from '$lib/config/ladder';
+import { MAX_HIT_ODDS, LADDER_CONFIG, type LadderUnderlying } from '$lib/config/ladder';
 import { computeTier, hitAccuracy, payoutFor, signedTargetPoints, type TierBet } from './tier';
 
 const PREV = 25_000;
@@ -91,7 +91,7 @@ describe('computeTier — the dead zone is checked first, and strictly', () => {
 	] as const)(
 		'%s refunds strictly inside ±%s points, whatever the direction',
 		(underlying, halfStep) => {
-			const step = LADDER_CONFIG[underlying].steps[0];
+			const step = LADDER_CONFIG[underlying].stepSpacing;
 			expect(up(underlying, step, halfStep - 0.01)).toBe('flat');
 			expect(down(underlying, step, -(halfStep - 0.01))).toBe('flat');
 			// A wrong-direction bet inside the dead zone still refunds — the dead zone
@@ -106,7 +106,7 @@ describe('computeTier — the dead zone is checked first, and strictly', () => {
 		['banknifty', 50],
 		['sensex', 75]
 	] as const)('%s at exactly ±%s is a real move, not a refund', (underlying, halfStep) => {
-		const step = LADDER_CONFIG[underlying].steps[0];
+		const step = LADDER_CONFIG[underlying].stepSpacing;
 		// At the boundary the target band is still out of reach, so this is a loss —
 		// the point of the assertion is that it is NOT a flat.
 		expect(up(underlying, step, halfStep)).toBe('miss');
@@ -205,14 +205,10 @@ describe('payoutFor', () => {
 	});
 
 	it('always returns a whole number of chips', () => {
-		for (const underlying of LADDER_UNDERLYINGS) {
-			for (const step of LADDER_CONFIG[underlying].steps) {
-				for (const stake of [10, 33, 111, 999, 100_000]) {
-					const payout = payoutFor('hit', stake, LADDER_CONFIG[underlying].odds[step]);
-					expect(Number.isInteger(payout)).toBe(true);
-					expect(payout).toBe(Math.round(stake * LADDER_CONFIG[underlying].odds[step]));
-				}
-			}
+		for (const stake of [10, 33, 111, 999, 100_000]) {
+			const payout = payoutFor('hit', stake, MAX_HIT_ODDS);
+			expect(Number.isInteger(payout)).toBe(true);
+			expect(payout).toBe(Math.round(stake * MAX_HIT_ODDS));
 		}
 	});
 

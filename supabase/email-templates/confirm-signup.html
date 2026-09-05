@@ -1,0 +1,165 @@
+{{!-- NiftyCASino — Confirm signup email template. Paste the BODY into: Supabase Dashboard →
+Authentication → Emails → Templates → "Confirm signup". Subject line is in README.md next to this
+file. `{{ .SiteURL }}` is the project's configured Site URL; the token lands on the app's own
+/auth/confirm route (see that route's doc comment for the flow). --}}
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="dark" />
+		<title>Confirm your email · NiftyCASino</title>
+	</head>
+	<body style="margin: 0; padding: 0; background-color: #09090b">
+		<table
+			role="presentation"
+			width="100%"
+			cellpadding="0"
+			cellspacing="0"
+			style="background-color: #09090b; padding: 32px 12px"
+		>
+			<tr>
+				<td align="center">
+					<table
+						role="presentation"
+						width="600"
+						cellpadding="0"
+						cellspacing="0"
+						style="max-width: 600px; width: 100%"
+					>
+						<!-- Wordmark -->
+						<tr>
+							<td align="center" style="padding: 8px 0 24px 0">
+								<span
+									style="
+										font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+										font-size: 22px;
+										font-weight: 800;
+										letter-spacing: -0.02em;
+										color: #ffe08a;
+									"
+									>Nifty<span style="color: #f5c451">CAS</span
+									><span style="color: #e4e4e7">ino</span></span
+								>
+								<span
+									style="
+										font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+										font-size: 11px;
+										color: #71717a;
+									"
+									>&nbsp;&nbsp;·&nbsp;&nbsp;NiftyCASino.com</span
+								>
+							</td>
+						</tr>
+						<!-- Card -->
+						<tr>
+							<td
+								style="
+									background-color: #101014;
+									border: 1px solid #23232d;
+									border-radius: 12px;
+									padding: 36px 32px;
+								"
+							>
+								<h1
+									style="
+										margin: 0 0 8px 0;
+										font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+										font-size: 22px;
+										font-weight: 700;
+										color: #f5f5f4;
+									"
+								>
+									You're almost at the table, {{ .Email }}
+								</h1>
+								<p
+									style="
+										margin: 0 0 20px 0;
+										font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+										font-size: 15px;
+										line-height: 1.6;
+										color: #a1a1aa;
+									"
+								>
+									Confirm your email address to activate your account — your
+									<strong style="color: #f5c451">1,000 NC signup bonus</strong> is already stacked
+									and waiting.
+								</p>
+								<!-- CTA button -->
+								<table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+									<tr>
+										<td align="center" style="padding: 4px 0 8px 0">
+											<a
+												href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup"
+												style="
+													display: inline-block;
+													background-color: #f5c451;
+													color: #09090b;
+													font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+													font-size: 16px;
+													font-weight: 700;
+													text-decoration: none;
+													padding: 14px 36px;
+													border-radius: 10px;
+												"
+											>
+												Confirm my email
+											</a>
+										</td>
+									</tr>
+								</table>
+								<p
+									style="
+										margin: 20px 0 0 0;
+										font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+										font-size: 13px;
+										line-height: 1.6;
+										color: #71717a;
+									"
+								>
+									This link works once and expires after 24 hours. If the button doesn't work, copy
+									this address into your browser:<br />
+									<a
+										href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=signup"
+										style="color: #f5c451; word-break: break-all"
+										>{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=signup</a
+									>
+								</p>
+							</td>
+						</tr>
+						<!-- Footer -->
+						<tr>
+							<td style="padding: 20px 8px 0 8px">
+								<p
+									style="
+										margin: 0 0 6px 0;
+										font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+										font-size: 12px;
+										line-height: 1.6;
+										color: #52525b;
+									"
+								>
+									Didn't sign up at
+									<a href="{{ .SiteURL }}" style="color: #a8842f">NiftyCASino.com</a>? Ignore this
+									email — nothing will happen without it.
+								</p>
+								<p
+									style="
+										margin: 0;
+										font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+										font-size: 11px;
+										line-height: 1.6;
+										color: #3f3f46;
+									"
+								>
+									NiftyCASino is play-money entertainment. No real money can be deposited, wagered
+									or won. 18+ only.
+								</p>
+							</td>
+						</tr>
+					</table>
+				</td>
+			</tr>
+		</table>
+	</body>
+</html>

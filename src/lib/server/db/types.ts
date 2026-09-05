@@ -48,7 +48,7 @@ export const LEDGER_KINDS: readonly LedgerKind[] = [
 ];
 
 /** Where an official close came from (PLAN §3 index_closes.source). */
-export type CloseSource = 'official' | 'live_approx';
+export type CloseSource = 'official' | 'live_approx' | 'ltp_anchor';
 
 /** profiles — one row per user; `balance` is the wallet (integer NC chips, never negative). */
 export type Profile = {
@@ -123,7 +123,7 @@ export type CasTickRow = {
 	changePct: number;
 };
 
-/** index_closes — the official (or live-approximate) close per index per day. */
+/** index_closes — the official close, the poller's prev-close fallback, or the day's 15:15 LTP anchor. */
 export type IndexClose = {
 	tradeDate: string;
 	underlying: Underlying;

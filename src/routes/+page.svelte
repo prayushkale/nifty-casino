@@ -31,6 +31,7 @@
 	} from '$lib/stores/game';
 	import type { GamePhase } from '$lib/stores/game';
 	import { casStream, startCasStream, resyncCasStream } from '$lib/stores/casStream';
+	import { ltpQuotes, startLtpFeed } from '$lib/stores/ltp';
 	import { startRevealWatcher } from '$lib/stores/reveal';
 
 	/**
@@ -57,20 +58,18 @@
 	$: myBets = state.myBets;
 	$: latest = $casLatest;
 	$: stream = $casStream;
-	// `/api/closes/last` backfill — covers the blank-chart gap when
-	// `index_closes` has not yet been seeded (fresh deploy / before first
-	// CAS poll). Merged over the DB anchors so a live `previousClose` from
-	// NSE/BSE gives every chart a centred synthetic line on first paint.
-	let closeFill: Record<LadderUnderlying, number | null> | null = null;
-	$: anchors = (() => {
-		const base = state.ladder.anchors;
-		if (!closeFill) return base;
-		return {
-			nifty: base.nifty ?? closeFill.nifty,
-			banknifty: base.banknifty ?? closeFill.banknifty,
-			sensex: base.sensex ?? closeFill.sensex
-		} as Record<LadderUnderlying, number | null>;
-	})();
+	// The last traded price: shown the moment a visitor lands, refreshed on the
+	// server's schedule (see `$lib/stores/ltp`) and frozen at 15:15:01 IST as the
+	// day's betting anchor. It is also the chart's first point — the cash line
+	// that starts at 15:20 draws FROM it.
+	$: ltp = $ltpQuotes;
+	/** CAS display values win once the auction ticks; the LTP carries the pre-15:20 screen. */
+	$: displayLatest = {
+		nifty: latest.nifty ?? ltp.nifty,
+		banknifty: latest.banknifty ?? ltp.banknifty,
+		sensex: latest.sensex ?? ltp.sensex
+	};
+	$: anchors = state.ladder.anchors;
 	// The rank is derived from the XP the payload already carries — never stored,
 	// so a re-tune of the ladder re-titles everyone with no migration.
 	$: xp = state.user?.xp ?? 0;
@@ -97,7 +96,7 @@
 	 * out, re-read `/api/state` for the official close and the verdicts. One interval
 	 * for the whole page, not one per chart — three charts would mean three timers
 	 * asking the same question. Cleared the moment the phase leaves `locked`.
-	 * Gated to 15:00+ IST — before the window the player just needs the last close
+	 * Gated to 15:15+ IST — before the window the player just needs the last price
 	 * to place a bet, not a poll for a close that cannot exist yet.
 	 */
 	let settleTimer: ReturnType<typeof setInterval> | null = null;
@@ -167,34 +166,9 @@
 		seedState(data.state);
 		const stopClock = startClock();
 
-		// Backfill anchors for every chart before the first CAS tick.
-		// `state.ladder.anchors` can be all-null on a fresh deploy (no
-		// `index_closes` rows yet). This one-shot fetch merges live
-		// `previousClose` values over the DB anchors so each CasChart can
-		// render its centred synthetic flat line immediately.
-		void (async () => {
-			const needsFill =
-				state.ladder.anchors.nifty === null ||
-				state.ladder.anchors.banknifty === null ||
-				state.ladder.anchors.sensex === null;
-			if (!needsFill) return;
-			try {
-				const res = await fetch(`/api/closes/last?date=${encodeURIComponent(state.tradeDate)}`);
-				if (!res.ok) return;
-				const body = (await res.json()) as {
-					closes?: Record<LadderUnderlying, number | null>;
-				};
-				if (!body.closes) return;
-				const haveAny =
-					body.closes.nifty !== null ||
-					body.closes.banknifty !== null ||
-					body.closes.sensex !== null;
-				if (!haveAny) return;
-				closeFill = body.closes;
-			} catch {
-				// non-fatal — charts keep whatever DB anchors they had
-			}
-		})();
+		// The last traded price: one load now, 30s refreshes from 15:00, one final
+		// load at 15:15:01 IST — then static. The feed owns its own schedule.
+		const stopLtp = startLtpFeed();
 
 		// The settlement reveal (T13): confetti on a HIT, a toast on a flat or a
 		// miss, once per bet per browser. It watches the shared `/api/state` store,
@@ -229,6 +203,7 @@
 			stopClock();
 			stopReveals();
 			stopStream();
+			stopLtp();
 			if (settleTimer !== null) clearInterval(settleTimer);
 			settleTimer = null;
 			mq.removeEventListener('change', apply);
@@ -241,11 +216,11 @@
 	<title>NiftyCASino — call the closing auction</title>
 	<meta
 		name="description"
-		content="Forecast how NIFTY 50, BANKNIFTY and SENSEX close in SEBI's Closing Auction Session. Play-money chips, 15:00–15:20 IST daily."
+		content="Forecast how NIFTY 50, BANKNIFTY and SENSEX close in SEBI's Closing Auction Session. Play-money chips, 15:15–15:20 IST daily."
 	/>
 </svelte:head>
 
-<div class="mx-auto flex w-full max-w-[1600px] flex-col gap-5 pb-24 pt-4 md:pb-10 lg:px-2 xl:px-4">
+<div class="flex w-full flex-col gap-5 px-3 pb-24 pt-4 md:px-4 md:pb-10 lg:px-5">
 	<!-- ── the day, and what the room has staked ───────────────────────────────── -->
 	{#if !state.session.settled && state.user}
 		<section
@@ -327,7 +302,7 @@
 				Call the close. Win the pot.
 			</h1>
 			<p class="mt-2 max-w-2xl text-[15px] leading-relaxed text-zinc-700 dark:text-zinc-300">
-				Between 15:00 and 15:20 IST, pick how NIFTY 50, BANKNIFTY and SENSEX will close in SEBI's
+				Between 15:15 and 15:20 IST, pick how NIFTY 50, BANKNIFTY and SENSEX will close in SEBI's
 				Closing Auction Session. Hit the target and your stake is paid at up to 6×. Get it wrong and
 				the stake is gone — that is the game.
 			</p>
@@ -366,7 +341,7 @@
 			</header>
 		{/if}
 		<p class="text-xs text-zinc-500 dark:text-zinc-400">
-			CAS 15:13:30 → 15:42 IST · live ticks replace the previous-close line once the auction starts
+			Last traded price till 15:15 · cash-session chart draws from 15:20 · betting 15:15–15:20 IST
 		</p>
 		<FeedStatusBanner />
 		<!-- Theater: expanded chart owns its row; others' charts hide — bets stay put. -->
@@ -377,11 +352,11 @@
 						{underlying}
 						label={INDEX_LABELS[underlying]}
 						ticks={stream.series[underlying]}
-						latest={latest[underlying]}
+						latest={displayLatest[underlying]}
+						ltp={ltp[underlying]}
 						anchor={anchors[underlying]}
 						myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
 						{phase}
-						tradeDate={state.tradeDate}
 						isTheater={theater === underlying}
 						isFullscreen={fullscreen === underlying}
 						displayHeight={theaterHeightFor(underlying)}
@@ -402,11 +377,11 @@
 						{underlying}
 						label={INDEX_LABELS[underlying]}
 						ticks={stream.series[underlying]}
-						latest={latest[underlying]}
+						latest={displayLatest[underlying]}
+						ltp={ltp[underlying]}
 						anchor={anchors[underlying]}
 						myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
 						{phase}
-						tradeDate={state.tradeDate}
 						isTheater={theater === underlying}
 						isFullscreen={fullscreen === underlying}
 						displayHeight={theaterHeightFor(underlying) ?? fullscreenHeightFor(underlying)}
@@ -428,7 +403,7 @@
 				on:keydown={onKeydown}
 				tabindex="-1"
 			>
-				<div class="mx-auto flex w-full max-w-[1600px] flex-1 flex-col gap-4 overflow-auto">
+				<div class="flex w-full flex-1 flex-col gap-4 overflow-auto">
 					<div class="flex items-center justify-between">
 						<h2 class="text-sm font-semibold uppercase tracking-widest text-white">
 							{INDEX_LABELS[fullscreen]} — fullscreen
@@ -443,11 +418,11 @@
 						underlying={fullscreen}
 						label={INDEX_LABELS[fullscreen]}
 						ticks={stream.series[fullscreen]}
-						latest={latest[fullscreen]}
+						latest={displayLatest[fullscreen]}
+						ltp={ltp[fullscreen]}
 						anchor={anchors[fullscreen]}
 						myBet={myBets.find((bet) => bet.underlying === fullscreen) ?? null}
 						{phase}
-						tradeDate={state.tradeDate}
 						isFullscreen={true}
 						displayHeight={fullscreenHeightFor(fullscreen)}
 						on:theater={() => {
@@ -464,12 +439,13 @@
 								label={INDEX_LABELS[fullscreen]}
 								options={state.ladder.options.filter((o) => o.underlying === fullscreen)}
 								anchor={anchors[fullscreen]}
-								latest={latest[fullscreen]}
+								latest={displayLatest[fullscreen]}
 								{phase}
 								{authed}
 								{balance}
 								loading={$stateLoading}
 								myBet={myBets.find((bet) => bet.underlying === fullscreen) ?? null}
+								crowd={state.crowd[fullscreen] ?? []}
 								expanded={true}
 								on:toggle={() => {}}
 								on:action={() => {
@@ -491,12 +467,13 @@
 							label={INDEX_LABELS[underlying]}
 							options={state.ladder.options.filter((option) => option.underlying === underlying)}
 							anchor={anchors[underlying]}
-							latest={latest[underlying]}
+							latest={displayLatest[underlying]}
 							{phase}
 							{authed}
 							{balance}
 							loading={$stateLoading}
 							myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
+							crowd={state.crowd[underlying] ?? []}
 							expanded={expandedFor(underlying)}
 							on:toggle={() => toggleCard(underlying)}
 							on:action={() => focusCard(underlying)}

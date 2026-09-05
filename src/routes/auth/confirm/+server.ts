@@ -19,7 +19,11 @@ import type { EmailOtpType } from '@supabase/supabase-js';
  *
  * Unauthenticated by design — it is the one route that exists to consume an
  * emailed token, so it never checks `locals.userId` first. Where it sends you:
- * signup → `/`, recovery → `/auth/reset`, anything wrong → `/auth/login?error=`.
+ * signup → `/auth/login?verified=1` (the "Email verified" banner sits above the
+ * form and the player logs in from there — we deliberately do NOT auto-sign-in
+ * off the emailed link, so the session the token mint is replaced by an
+ * intentional login), recovery → `/auth/reset`, anything wrong →
+ * `/auth/login?error=`.
  */
 export const GET: RequestHandler = async (event) => {
 	const supabase = getSupabaseForEvent(event);
@@ -35,23 +39,40 @@ export const GET: RequestHandler = async (event) => {
 	const rawType = event.url.searchParams.get('type');
 	const type = EMAIL_OTP_TYPES.find((t) => t === rawType) ?? null;
 
-	// A recovery link must end at the new-password form; everything else goes home.
-	const next = type === 'recovery' ? '/auth/reset' : '/';
+	// A recovery link must end at the new-password form; a signup link lands on
+	// the login screen with the "Email verified" banner (see `?verified=1`).
+	const next = type === 'recovery' ? '/auth/reset' : '/auth/login?verified=1';
 
 	if (code) {
 		const { error } = await supabase.auth.exchangeCodeForSession(code);
+		await dropSignupSession(supabase, type);
 		return confirmRedirect(next, error);
 	}
 
 	if (tokenHash && type) {
 		const { error } = await supabase.auth.verifyOtp({ type, token_hash: tokenHash });
+		await dropSignupSession(supabase, type);
 		return confirmRedirect(next, error);
 	}
 
 	// No token at all. Usually a link clicked twice (the first use consumed it) or
-	// a hand-typed URL — both are harmless, so send them home rather than scolding.
-	return redirect(303, next);
+	// a hand-typed URL — both are harmless, so send them along rather than
+	// scolding. Deliberately NOT `?verified=1`: nothing was verified here.
+	return redirect(303, type === 'recovery' ? '/auth/reset' : '/auth/login');
 };
+
+/**
+ * A successful signup verification minted a session cookie — but the flow we
+ * show is "Email verified → log in", so clear it (harmless if nothing was set)
+ * and let the login form issue the real one. Recovery keeps its session: the
+ * `/auth/reset` page needs it to call `updateUser({ password })`.
+ */
+async function dropSignupSession(
+	supabase: NonNullable<Awaited<ReturnType<typeof getSupabaseForEvent>>>,
+	type: EmailOtpType | null
+): Promise<void> {
+	if (type !== 'recovery') await supabase.auth.signOut();
+}
 
 /** Map a failed exchange onto the login page with a readable banner message. */
 function confirmRedirect(next: string, error: { message: string } | null): never {

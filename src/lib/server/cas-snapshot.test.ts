@@ -29,6 +29,7 @@ function payload(ts: number, value: number, underlying: Underlying = 'nifty'): C
 		changePct: 0.04,
 		prevClose: 24988,
 		ts,
+		upstreamTs: null,
 		source: 'nse'
 	};
 }
@@ -261,6 +262,7 @@ describe('buildCasSnapshot — past-day replay (?date=)', () => {
 			changePct: ((24014 - 24988) / 24988) * 100,
 			prevClose: 24988,
 			ts: snapshot.ticks.nifty.at(-1)?.ts,
+			upstreamTs: null,
 			source: 'archive'
 		});
 	});

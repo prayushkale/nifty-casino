@@ -74,13 +74,21 @@ beforeEach(async () => {
 	invalidateLadderCache();
 
 	const store = getStore();
-	// Yesterday's official closes are what today's ladder hangs off.
+	// Yesterday's official closes are what today's ladder hangs off…
 	for (const [underlying, close] of Object.entries(ANCHORS)) {
 		await store.closes.upsertIndexClose({
 			tradeDate: WEDNESDAY,
 			underlying: underlying as Underlying,
 			close,
 			source: 'official'
+		});
+		// …and today's 15:15:01 LTP anchor is what it hangs off in-window. Seeding it
+		// keeps the wrapper from attempting a REAL feed fetch on the fake clock — the
+		// anchor row is exactly what the poller would have written by 15:19.
+		await store.closes.upsertIndexLtpAnchor({
+			tradeDate: DAY,
+			underlying: underlying as Underlying,
+			close
 		});
 	}
 	await store.profiles.insertProfile({
@@ -92,7 +100,7 @@ beforeEach(async () => {
 	await store.sessions.ensureSession(DAY, CUTOFF);
 
 	vi.useFakeTimers({ toFake: ['Date'] });
-	vi.setSystemTime(new Date(istAt(DAY, 15, 10, 0)));
+	vi.setSystemTime(new Date(istAt(DAY, 15, 19, 0)));
 });
 
 afterEach(() => {
@@ -104,17 +112,19 @@ afterEach(() => {
 
 /** Two of today's bets, the older one already settled as a HIT on nifty ±50. */
 async function seedTwoBets(): Promise<void> {
-	vi.setSystemTime(new Date(istAt(DAY, 15, 5, 0)));
+	vi.setSystemTime(new Date(istAt(DAY, 15, 16, 0)));
 	const older = await placeBet(USER, {
 		underlying: 'nifty',
 		targetKind: 'up',
 		deltaPoints: 50,
 		stake: 100
 	});
-	vi.setSystemTime(new Date(istAt(DAY, 15, 6, 0)));
+	vi.setSystemTime(new Date(istAt(DAY, 15, 17, 0)));
 	await placeBet(USER, {
 		underlying: 'sensex',
 		targetKind: 'down',
+		// 81,750 PE: a real PE distance off the 82,000 anchor (300 is not — the
+		// strikes are round 150-multiples, so the distances sit 50/100 mod 150).
 		deltaPoints: 250,
 		stake: 300
 	});
@@ -135,17 +145,19 @@ describe('GET /api/state (anonymous)', () => {
 		expect(response.headers.get('cache-control')).toBe('private, no-store');
 
 		const body = (await response.json()) as StatePayload;
-		expect(body.serverNow).toBe(istAt(DAY, 15, 10, 0));
+		expect(body.serverNow).toBe(istAt(DAY, 15, 19, 0));
 		expect(body.tradeDate).toBe(DAY);
 		expect(body.user).toBeNull();
 		expect(body.myBets).toEqual([]);
 
+		// The participation window (15:15–15:20) sits entirely inside the auction
+		// window (15:13:30–15:42), so both flags read true together in-window.
 		expect(body.session).toEqual({
 			exists: true,
 			status: 'open',
 			cutoffAtMs: CUTOFF,
 			bettingWindowOpen: true,
-			auctionLive: false,
+			auctionLive: true,
 			settled: false
 		});
 
@@ -163,7 +175,7 @@ describe('GET /api/state (anonymous)', () => {
 		// The ladder is the whole reason the page can render before anything happens.
 		expect(body.ladder.tradeDate).toBe(DAY);
 		expect(body.ladder.anchors).toEqual(ANCHORS);
-		expect(body.ladder.options).toHaveLength(24);
+		expect(body.ladder.options).toHaveLength(94);
 	});
 
 	it('creates nothing: a day nobody has touched reads as a missing session, not a new row', async () => {
@@ -253,8 +265,8 @@ describe('GET /api/state — time flags from one captured instant', () => {
 	};
 
 	it.each([
-		['14:59:59', 14, 59, 59, false],
-		['15:00:00 (inclusive start)', 15, 0, 0, true],
+		['15:14:59 (one second early)', 15, 14, 59, false],
+		['15:15:00 (inclusive start)', 15, 15, 0, true],
 		['15:20:00 (inclusive cutoff)', 15, 20, 0, true],
 		['15:20:01 (one second late)', 15, 20, 1, false]
 	])('bettingWindowOpen at %s → %s', async (_label, h, m, s, expected) => {

@@ -394,12 +394,12 @@ describe('isFeedStale — three missed 4s polls, and only while the auction is l
 		expect(isFeedStale({ newestTickTs: null, now: at(15, 30, 0), auctionLive: true })).toBe(false);
 	});
 
-	it('the config default is the 12s the plan asks for', () => {
+	it('the config default is the 8s that four missed 2s polls imply', () => {
 		expect(
-			isFeedStale({ newestTickTs: at(15, 20, 0), now: at(15, 20, 0) + 12_001, auctionLive: true })
+			isFeedStale({ newestTickTs: at(15, 20, 0), now: at(15, 20, 0) + 8_001, auctionLive: true })
 		).toBe(true);
 		expect(
-			isFeedStale({ newestTickTs: at(15, 20, 0), now: at(15, 20, 0) + 12_000, auctionLive: true })
+			isFeedStale({ newestTickTs: at(15, 20, 0), now: at(15, 20, 0) + 8_000, auctionLive: true })
 		).toBe(false);
 	});
 });

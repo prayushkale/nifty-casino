@@ -12,7 +12,7 @@
 	const rows = LADDER_UNDERLYINGS.map((u) => ({
 		underlying: u,
 		label: INDEX_LABELS[u],
-		steps: LADDER_CONFIG[u].steps,
+		spacing: LADDER_CONFIG[u].stepSpacing,
 		tolerance: LADDER_CONFIG[u].tolerancePts,
 		deadZone: deadZoneHalfStep(u)
 	}));
@@ -62,7 +62,7 @@
 		<h2 class="text-base font-semibold text-amber-700 dark:text-gold">1 · The day in 30 seconds</h2>
 		<ol class="mt-3 flex list-decimal flex-col gap-2 pl-5 leading-relaxed">
 			<li>
-				Between <strong>15:00 and 15:20 IST</strong> on a trading day, pick how each index will close
+				Between <strong>15:15 and 15:20 IST</strong> on a trading day, pick how each index will close
 				— NIFTY 50, BANKNIFTY, SENSEX. Any subset: one call per index, and you can edit or cancel free
 				until the 15:20 cutoff.
 			</li>
@@ -157,15 +157,18 @@
 	<section class="nc-card p-5">
 		<h2 class="text-base font-semibold text-amber-700 dark:text-gold">4 · The board, per index</h2>
 		<p class="mt-1.5 text-zinc-600 dark:text-zinc-400">
-			Each index offers four round-number moves, both directions. Same max everywhere; the band and
-			the dead zone differ because the indices move on different scales.
+			Each index offers strikes every few points, in both directions, spanning the whole ±3% closing
+			auction band around the 15:15 anchor — you pick the exact level you expect the close to land
+			at. Same max everywhere; the spacing, band and dead zone differ because the indices move on
+			different scales.
 		</p>
 		<div class="mt-4 overflow-x-auto">
 			<table class="w-full min-w-[480px] border-collapse text-left text-[13px]">
 				<thead>
 					<tr class="text-[11px] uppercase tracking-wide text-zinc-500">
 						<th class="border-b border-zinc-200 px-2 py-1.5 dark:border-felt-700">Index</th>
-						<th class="border-b border-zinc-200 px-2 py-1.5 dark:border-felt-700">Moves (pts)</th>
+						<th class="border-b border-zinc-200 px-2 py-1.5 dark:border-felt-700">Strike spacing</th
+						>
 						<th class="border-b border-zinc-200 px-2 py-1.5 dark:border-felt-700">Hit band</th>
 						<th class="border-b border-zinc-200 px-2 py-1.5 dark:border-felt-700"
 							>Flat if |move| &lt;</th
@@ -179,7 +182,7 @@
 							<td class="num px-2 py-2 font-semibold text-zinc-900 dark:text-zinc-100"
 								>{row.label}</td
 							>
-							<td class="num px-2 py-2">±{row.steps.join(' · ±')}</td>
+							<td class="num px-2 py-2">every {row.spacing} pts, across the ±3% band</td>
 							<td class="num px-2 py-2">±{row.tolerance}</td>
 							<td class="num px-2 py-2">{row.deadZone}</td>
 							<td class="num px-2 py-2">{MAX_HIT_ODDS}×</td>

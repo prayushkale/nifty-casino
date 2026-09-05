@@ -32,6 +32,7 @@ function payload(ts: number, value: number, underlying: Underlying = 'nifty'): C
 		changePct: 0.04,
 		prevClose: 24988,
 		ts,
+		upstreamTs: null,
 		source: 'nse'
 	};
 }
@@ -86,6 +87,7 @@ describe('GET /api/cas/all', () => {
 				changePct: 0.04,
 				prevClose: 24988,
 				ts: istAt(DAY, 15, 19, 52),
+				upstreamTs: null,
 				source: 'nse'
 			}
 		});

@@ -2,10 +2,9 @@
  * Live previous-close fallback — the "No ladder … previous close has not landed
  * yet" fix.
  *
- * When `index_closes` has no anchor (fresh deploy, or 15:00–15:13:30 before the
- * poller's first `live_approx` write), the ladder, the `/api/state` payload and
- * bet validation all fall back to the last closing price the NSE/BSE feeds
- * carry right now — so a logged-in player sees bettable ladders instead of an
+ * When `index_closes` has no anchor (fresh deploy, or before the 15:15:01 LTP
+ * anchor lands), the ladder, the `/api/state` payload and bet validation all
+ * fall back to the last closing price the NSE/BSE feeds carry right now — so a logged-in player sees bettable ladders instead of an
  * empty card. Every test here injects the feeds; the real network is never
  * touched.
  */
@@ -29,7 +28,7 @@ import {
 import { buildStatePayload } from './state';
 import { BetError, placeBet } from './bets';
 
-// A Thursday trading day; the window is 15:00–15:20 IST.
+// A Thursday trading day; the participation window is 15:15–15:20 IST.
 const THURSDAY = '2026-08-27';
 const at = (h: number, m = 0, s = 0): Date => new Date(istAt(THURSDAY, h, m, s));
 
@@ -143,21 +142,21 @@ describe('the reported bug: empty DB, logged-in player', () => {
 			banknifty: BANK_CLOSE,
 			sensex: SENSEX_CLOSE
 		});
-		expect(ladder.options).toHaveLength(24);
+		expect(ladder.options).toHaveLength(94);
 	});
 
 	it('the state payload carries bettable ladders instead of an empty card', async () => {
 		const store = await emptyStore();
 		const payload = await buildStatePayload({
 			store,
-			now: at(15, 10),
+			now: at(15, 18),
 			userId: USER,
 			authSource: 'dev',
 			live: LIVE_DEPS
 		});
 		expect(payload.user?.handle).toBe('meera');
 		expect(payload.ladder.anchors.nifty).toBe(NIFTY_CLOSE);
-		expect(payload.ladder.options).toHaveLength(24);
+		expect(payload.ladder.options).toHaveLength(94);
 	});
 
 	it('a rung the player could SEE is a rung they can BET', async () => {
@@ -165,7 +164,7 @@ describe('the reported bug: empty DB, logged-in player', () => {
 		const bet = await placeBet(
 			USER,
 			{ underlying: 'nifty', targetKind: 'up', deltaPoints: 50, stake: 100 },
-			{ now: at(15, 5), store, live: LIVE_DEPS }
+			{ now: at(15, 16), store, live: LIVE_DEPS }
 		);
 		expect(bet.odds).toBe(28);
 		expect(bet.deltaPoints).toBe(50);
@@ -186,7 +185,7 @@ describe('the reported bug: empty DB, logged-in player', () => {
 			placeBet(
 				USER,
 				{ underlying: 'nifty' as Underlying, targetKind: 'up', deltaPoints: 50, stake: 100 },
-				{ now: at(15, 5), store, live: false }
+				{ now: at(15, 16), store, live: false }
 			)
 		).rejects.toBeInstanceOf(BetError);
 	});

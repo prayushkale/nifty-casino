@@ -9,7 +9,7 @@
  * stores, no clock — the instants are built from the IST helpers the server uses.
  */
 import { describe, expect, it } from 'vitest';
-import { CUTOFF_HMS } from '$lib/config/app';
+import { BETTING_START_HMS, CUTOFF_HMS } from '$lib/config/app';
 import type { LadderOption, LadderUnderlying } from '$lib/config/ladder';
 import { isWeekend, istDateStrToMidnightUtcMs, istHmsToUtcMs, shiftIstDate } from '$lib/time/ist';
 import {
@@ -61,7 +61,7 @@ const stateAt = (
 		cutoffAtMs: CUTOFF,
 		// The two window flags are the server's own view; the phase machine reads the
 		// clock itself so a stale payload cannot show a closed window as open.
-		bettingWindowOpen: !over.settled && now >= CUTOFF - 20 * 60_000 && now <= CUTOFF,
+		bettingWindowOpen: !over.settled && now >= CUTOFF - 5 * 60_000 && now <= CUTOFF,
 		auctionLive: false,
 		settled: over.settled ?? false
 	}
@@ -71,11 +71,11 @@ const stateAt = (
 // bettingPhase
 // ---------------------------------------------------------------------------
 
-describe('bettingPhase — the 15:00 → 15:20 IST window on its exact boundaries', () => {
+describe('bettingPhase — the 15:15 → 15:20 IST window on its exact boundaries', () => {
 	it.each([
-		['one tick before the window', at(WEEKDAY, 14, 59, 59, 999), 'pre'],
-		['the opening instant itself', at(WEEKDAY, 15, 0, 0, 0), 'open'],
-		['mid-window', at(WEEKDAY, 15, 9, 30, 0), 'open'],
+		['one tick before the window', at(WEEKDAY, 15, 14, 59, 999), 'pre'],
+		['the opening instant itself', at(WEEKDAY, 15, 15, 0, 0), 'open'],
+		['mid-window', at(WEEKDAY, 15, 17, 30, 0), 'open'],
 		['one tick before the cutoff', at(WEEKDAY, 15, 19, 59, 999), 'open'],
 		[
 			'the cutoff instant — the window is inclusive on BOTH ends, as the server judges it',
@@ -83,7 +83,7 @@ describe('bettingPhase — the 15:00 → 15:20 IST window on its exact boundarie
 			'open'
 		],
 		['one tick past the cutoff', at(WEEKDAY, 15, 20, 0, 1), 'locked'],
-		['the auction, still betting', at(WEEKDAY, 15, 13, 30, 0), 'open'],
+		['the auction, still betting', at(WEEKDAY, 15, 16, 0, 0), 'open'],
 		['the auction, after the cutoff', at(WEEKDAY, 15, 30, 0, 0), 'locked'],
 		['long after close', at(WEEKDAY, 21, 0, 0, 0), 'locked'],
 		['the small hours of the same day', at(WEEKDAY, 0, 0, 0, 0), 'pre']
@@ -99,7 +99,7 @@ describe('bettingPhase — the 15:00 → 15:20 IST window on its exact boundarie
 	});
 
 	it('accepts a Date as well as an epoch number', () => {
-		expect(bettingPhase(stateAt(CUTOFF), new Date(at(WEEKDAY, 15, 5, 0)))).toBe('open');
+		expect(bettingPhase(stateAt(CUTOFF), new Date(at(WEEKDAY, 15, 16, 0)))).toBe('open');
 	});
 });
 
@@ -421,7 +421,7 @@ describe('isLivePhase', () => {
 // the countdown to the NEXT session (T13)
 // ---------------------------------------------------------------------------
 
-describe('nextWindowOpen — the next 15:00:00 IST opening', () => {
+describe('nextWindowOpen — the next 15:15:00 IST opening', () => {
 	// 2026-08-26 is the Wednesday the tables above use; guard the rest of the week.
 	const THURSDAY = '2026-08-27';
 	const FRIDAY = '2026-08-28';
@@ -432,40 +432,47 @@ describe('nextWindowOpen — the next 15:00:00 IST opening', () => {
 	expect(isWeekend('2026-08-30')).toBe(true);
 
 	it('opens later on a trading day → today', () => {
+		const OPEN = at(THURSDAY, BETTING_START_HMS.h, BETTING_START_HMS.m, BETTING_START_HMS.s);
 		expect(nextWindowOpen(at(THURSDAY, 9, 0, 0))).toEqual({
-			ms: at(THURSDAY, 15, 0, 0) - at(THURSDAY, 9, 0, 0),
+			ms: OPEN - at(THURSDAY, 9, 0, 0),
 			label: 'today'
 		});
 	});
 
 	it('one second before the open → 1,000 ms, still today', () => {
-		expect(nextWindowOpen(at(FRIDAY, 14, 59, 59))).toEqual({
+		expect(
+			nextWindowOpen(at(FRIDAY, BETTING_START_HMS.h, BETTING_START_HMS.m, BETTING_START_HMS.s - 1))
+		).toEqual({
 			ms: 1_000,
 			label: 'today'
 		});
 	});
 
-	it('at 15:00:00.000 exactly the window is open, so the next one is tomorrow', () => {
-		expect(nextWindowOpen(at(THURSDAY, 15, 0, 0)).label).toBe('tomorrow');
-		expect(nextWindowOpen(at(THURSDAY, 15, 0, 0)).ms).toBe(86_400_000);
+	it('at the opening instant exactly the window is open, so the next one is tomorrow', () => {
+		const OPEN = at(THURSDAY, BETTING_START_HMS.h, BETTING_START_HMS.m, BETTING_START_HMS.s);
+		expect(nextWindowOpen(OPEN).label).toBe('tomorrow');
+		expect(nextWindowOpen(OPEN).ms).toBe(86_400_000);
 	});
 
-	it('after the session on a weekday → the next day at 15:00', () => {
+	it('after the session on a weekday → the next day at the opening instant', () => {
+		const OPEN_FRI = at(FRIDAY, BETTING_START_HMS.h, BETTING_START_HMS.m, BETTING_START_HMS.s);
 		expect(nextWindowOpen(at(THURSDAY, 16, 0, 0))).toEqual({
-			ms: at(FRIDAY, 15, 0, 0) - at(THURSDAY, 16, 0, 0),
+			ms: OPEN_FRI - at(THURSDAY, 16, 0, 0),
 			label: 'tomorrow'
 		});
 		expect(nextWindowOpen(at(THURSDAY, 23, 59, 59)).label).toBe('tomorrow');
 	});
 
 	it('Friday evening → Monday, skipping the weekend', () => {
+		const OPEN_MON = at(MONDAY, BETTING_START_HMS.h, BETTING_START_HMS.m, BETTING_START_HMS.s);
 		expect(nextWindowOpen(at(FRIDAY, 16, 0, 0))).toEqual({
-			ms: at(MONDAY, 15, 0, 0) - at(FRIDAY, 16, 0, 0),
+			ms: OPEN_MON - at(FRIDAY, 16, 0, 0),
 			label: 'Monday'
 		});
 	});
 
-	it('any instant of the weekend → Monday 15:00 IST', () => {
+	it('any instant of the weekend → Monday at the opening instant', () => {
+		const OPEN_MON = at(MONDAY, BETTING_START_HMS.h, BETTING_START_HMS.m, BETTING_START_HMS.s);
 		for (const instant of [
 			at(SATURDAY, 0, 0, 0),
 			at(SATURDAY, 15, 0, 0),
@@ -473,14 +480,14 @@ describe('nextWindowOpen — the next 15:00:00 IST opening', () => {
 		]) {
 			const next = nextWindowOpen(instant);
 			expect(next.label).toBe('Monday');
-			expect(next.ms).toBe(at(MONDAY, 15, 0, 0) - instant);
+			expect(next.ms).toBe(OPEN_MON - instant);
 		}
 	});
 
 	it('Sunday reads "tomorrow" — Monday really is the next day', () => {
 		const sunday = at('2026-08-30', 12, 0, 0);
 		expect(nextWindowOpen(sunday)).toEqual({
-			ms: at(MONDAY, 15, 0, 0) - sunday,
+			ms: at(MONDAY, BETTING_START_HMS.h, BETTING_START_HMS.m, BETTING_START_HMS.s) - sunday,
 			label: 'tomorrow'
 		});
 	});

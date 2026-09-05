@@ -1,9 +1,9 @@
 /**
- * Ladder config + generator (PLAN §5 T8).
+ * Ladder config + generator (PLAN §0.1, STRIKE-BASED).
  *
- * These pin the launch odds table (Task 15 re-validates the *values*, this pins
- * the *shape*: every step priced, SENSEX's missing 300, the ±3% CAS clamp and the
- * anchor-free day yielding no options at all).
+ * These pin the strike ladder's *shape*: the per-index spacing, the tolerance,
+ * the ±3% CAS band coverage, the anchor-free day yielding no strikes at all and
+ * the single accuracy-graded max on every strike.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -14,6 +14,7 @@ import {
 	deadZoneHalfStep,
 	generateLadderOptions,
 	isStepWithinCasBand,
+	ladderStrikesForAnchor,
 	round2,
 	tolerancePoints
 } from './ladder';
@@ -31,31 +32,10 @@ describe('LADDER_CONFIG', () => {
 		expect(LADDER_UNDERLYINGS).toEqual(['nifty', 'banknifty', 'sensex']);
 	});
 
-	it('offers four steps per index', () => {
-		for (const underlying of LADDER_UNDERLYINGS) {
-			expect(LADDER_CONFIG[underlying].steps, underlying).toHaveLength(4);
-		}
-	});
-
-	it('prices every step — an unpriced step would bet at undefined odds', () => {
-		for (const underlying of LADDER_UNDERLYINGS) {
-			const { steps, odds } = LADDER_CONFIG[underlying];
-			for (const step of steps) {
-				expect(odds[step], `${underlying} ±${step}`).toBeGreaterThan(1);
-			}
-		}
-	});
-
-	it('prices every rung at the single accuracy-graded max (not per-distance odds)', () => {
-		expect(MAX_HIT_ODDS).toBe(28);
-		expect(LADDER_CONFIG.nifty.odds).toEqual({ 50: 28, 100: 28, 150: 28, 200: 28 });
-		expect(LADDER_CONFIG.banknifty.odds).toEqual({ 100: 28, 200: 28, 300: 28, 400: 28 });
-		expect(LADDER_CONFIG.sensex.odds).toEqual({ 150: 28, 250: 28, 400: 28, 500: 28 });
-	});
-
-	it('keeps SENSEX free of a 300 step — its round-number spacing skips it', () => {
-		expect(LADDER_CONFIG.sensex.steps).toEqual([150, 250, 400, 500]);
-		expect(LADDER_CONFIG.sensex.steps).not.toContain(300);
+	it('spaces strikes by round-number steps — 50 / 100 / 150 points', () => {
+		expect(LADDER_CONFIG.nifty.stepSpacing).toBe(50);
+		expect(LADDER_CONFIG.banknifty.stepSpacing).toBe(100);
+		expect(LADDER_CONFIG.sensex.stepSpacing).toBe(150);
 	});
 
 	it('keeps the launch tolerances, wider for the wider index', () => {
@@ -65,20 +45,59 @@ describe('LADDER_CONFIG', () => {
 		expect(tolerancePoints('sensex')).toBe(40);
 	});
 
-	it('halves the smallest step for the dead zone (nifty 25 / banknifty 50 / sensex 75)', () => {
+	it('halves the strike spacing for the dead zone (nifty 25 / banknifty 50 / sensex 75)', () => {
 		expect(deadZoneHalfStep('nifty')).toBe(25);
 		expect(deadZoneHalfStep('banknifty')).toBe(50);
 		expect(deadZoneHalfStep('sensex')).toBe(75);
 	});
 
-	it('pays the same max on every rung: the multiplier grades by accuracy, not distance', () => {
-		// User-mandated: exact pays MAX_HIT_ODDS wherever the rung sits; nearby
-		// pays proportionally less (hitAccuracy), a miss pays 0. Far rungs price
-		// a higher house edge by design — see the ladder provenance comment.
-		for (const underlying of LADDER_UNDERLYINGS) {
-			const { steps, odds } = LADDER_CONFIG[underlying];
-			for (const step of steps) expect(odds[step], `${underlying} ±${step}`).toBe(MAX_HIT_ODDS);
-		}
+	it('prices every strike at the single accuracy-graded max', () => {
+		expect(MAX_HIT_ODDS).toBe(28);
+	});
+});
+
+describe('ladderStrikesForAnchor', () => {
+	it('fills the ±3% band with ROUND strike levels, CE above and PE below the anchor', () => {
+		// 3% of 25,000 = 750 → strikes 24,250 … 25,750; the anchor is a spacing
+		// multiple, so CE and PE distances mirror each other at 50…750.
+		const nifty = ladderStrikesForAnchor(25_000, 'nifty');
+		expect(nifty.up).toEqual([
+			50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600, 650, 700, 750
+		]);
+		expect(nifty.down).toEqual(nifty.up);
+
+		// 3% of 82,000 = 2,460 → strikes 79,550 … 84,450. The anchor is NOT a
+		// 150-multiple, so the first CE strike is 82,200 (+200) and the first PE
+		// strike is 81,900 (−100): round levels, unround distances.
+		const sensex = ladderStrikesForAnchor(82_000, 'sensex');
+		expect(sensex.up).toHaveLength(16);
+		expect(sensex.up[0]).toBe(200);
+		expect(sensex.up[sensex.up.length - 1]).toBe(2_450); // strike 84,450
+		expect(sensex.down).toHaveLength(16);
+		expect(sensex.down[0]).toBe(100); // strike 81,900
+		expect(sensex.down[sensex.down.length - 1]).toBe(2_350); // strike 79,650
+	});
+
+	it('never offers a strike inside the dead zone — that strike would be a trap', () => {
+		// sensex's first CE strike off 82,000 is 82,050, only 50 pts away — inside
+		// the 75-pt dead zone (|Δ| < 75 refunds everyone). It must not be offered.
+		const sensex = ladderStrikesForAnchor(82_000, 'sensex');
+		expect(sensex.up).not.toContain(50);
+		// The mirrored PE strike at −100 clears the zone and survives.
+		expect(sensex.down).toContain(100);
+	});
+
+	it('never offers a strike beyond the band — a small anchor truncates the chain', () => {
+		// 3% of 10,000 = 300 → banknifty strikes 9,700 … 10,300 → distances 300 down, 300 up.
+		const strikes = ladderStrikesForAnchor(10_000, 'banknifty');
+		expect(strikes.up).toEqual([100, 200, 300]);
+		expect(strikes.down).toEqual([100, 200, 300]);
+	});
+
+	it('yields nothing for a meaningless anchor', () => {
+		expect(ladderStrikesForAnchor(0, 'nifty')).toEqual({ up: [], down: [] });
+		expect(ladderStrikesForAnchor(-25_000, 'nifty')).toEqual({ up: [], down: [] });
+		expect(ladderStrikesForAnchor(Number.NaN, 'nifty')).toEqual({ up: [], down: [] });
 	});
 });
 
@@ -105,71 +124,65 @@ describe('isStepWithinCasBand', () => {
 });
 
 describe('generateLadderOptions', () => {
-	it('produces 8 options per fully eligible index (24 at the launch anchors)', () => {
-		const options = generateLadderOptions(LAUNCH_ANCHORS);
-		expect(options).toHaveLength(24);
-		for (const underlying of LADDER_UNDERLYINGS) {
-			expect(
-				options.filter((o) => o.underlying === underlying),
-				underlying
-			).toHaveLength(8);
-		}
-	});
-
-	it('builds targets as anchor ± step, both directions of every step', () => {
+	it('builds one option per round strike, CE above and PE below the anchor', () => {
 		const options = generateLadderOptions({ ...LAUNCH_ANCHORS, banknifty: null, sensex: null });
-		expect(options.map((o) => o.target)).toEqual([
-			25_050, 24_950, 25_100, 24_900, 25_150, 24_850, 25_200, 24_800
+		// 15 strikes per side × 2 sides = 30 nifty options: every CE strike first,
+		// then every PE strike, each ascending by distance.
+		expect(options).toHaveLength(30);
+		expect(options.slice(0, 2).map((o) => [o.deltaPoints, o.targetKind, o.target])).toEqual([
+			[50, 'up', 25_050],
+			[100, 'up', 25_100]
 		]);
-		expect(options.map((o) => o.targetKind)).toEqual([
-			'up',
-			'down',
-			'up',
-			'down',
-			'up',
-			'down',
-			'up',
-			'down'
-		]);
+		expect(options.at(-1)).toMatchObject({ deltaPoints: 750, targetKind: 'down', target: 24_250 });
+		expect(options.filter((o) => o.targetKind === 'up')).toHaveLength(15);
+		expect(options.filter((o) => o.targetKind === 'down')).toHaveLength(15);
 	});
 
-	it('copies the configured odds onto each option (the only odds source in the app)', () => {
+	it('prices every strike at MAX_HIT_ODDS (the only odds source in the app)', () => {
 		const options = generateLadderOptions(LAUNCH_ANCHORS);
-		const nifty = options.find((o) => o.underlying === 'nifty' && o.deltaPoints === 100);
-		expect(nifty?.odds).toBe(MAX_HIT_ODDS);
-		const sensex = options.find((o) => o.underlying === 'sensex' && o.deltaPoints === 400);
-		expect(sensex?.odds).toBe(MAX_HIT_ODDS);
-		expect(options.find((o) => o.underlying === 'sensex' && o.deltaPoints === 300)).toBeUndefined();
+		expect(options.length).toBe(30 + 32 + 32);
+		for (const option of options) expect(option.odds).toBe(MAX_HIT_ODDS);
 	});
 
-	it('rounds targets to 2dp for a fractional anchor', () => {
+	it('keeps the STRIKE round off a fractional anchor — the distance carries the dust', () => {
 		const options = generateLadderOptions({
-			nifty: 24_999.456,
+			nifty: 24_873.456,
 			banknifty: null,
 			sensex: null
 		});
-		expect(options.find((o) => o.targetKind === 'up' && o.deltaPoints === 50)?.target).toBe(
-			25_049.46
-		);
-		expect(options.find((o) => o.targetKind === 'down' && o.deltaPoints === 50)?.target).toBe(
-			24_949.46
-		);
+		// First CE strike is the round 24,900: distance 26.544, target 2dp-rounded.
+		const ce = options.find((o) => o.targetKind === 'up' && o.target === 24_900);
+		expect(ce).toBeDefined();
+		expect(ce?.deltaPoints).toBe(26.54);
+		// First PE strike is the round 24,850, only 23.456 pts below the anchor —
+		// inside the 25-pt dead zone, so it is withheld and the chain starts at 24,800.
+		const pe = options.find((o) => o.targetKind === 'down' && o.target === 24_850);
+		expect(pe).toBeUndefined();
+		const firstPe = options.find((o) => o.targetKind === 'down');
+		expect(firstPe?.target).toBe(24_800);
+		expect(firstPe?.deltaPoints).toBe(73.46);
 	});
 
-	it('drops the steps that exceed the ±3% CAS band and keeps the rest (partial clamp)', () => {
-		// 3% of 10,000 = 300pts: BANKNIFTY's 400 step cannot be reached in CAS, the
-		// other three can — a shorter ladder, not a failure.
+	it('truncates the chain inside the ±3% CAS band (partial clamp)', () => {
+		// 3% of 10,000 = 300pts: BANKNIFTY yields strikes 9,700..10,300 only.
 		const options = generateLadderOptions({ nifty: null, banknifty: 10_000, sensex: null });
-		expect(options.map((o) => o.deltaPoints)).toEqual([100, 100, 200, 200, 300, 300]);
+		expect(options.map((o) => [o.targetKind, o.deltaPoints])).toEqual([
+			['up', 100],
+			['up', 200],
+			['up', 300],
+			['down', 100],
+			['down', 200],
+			['down', 300]
+		]);
 		expect(options.filter((o) => o.deltaPoints === 400)).toHaveLength(0);
 	});
 
 	it('yields nothing for a missing, zero or non-finite anchor', () => {
 		expect(generateLadderOptions({ nifty: null, banknifty: null, sensex: null })).toEqual([]);
-		expect(generateLadderOptions({ nifty: 0, banknifty: 25_000, sensex: null })).toHaveLength(8);
+		expect(generateLadderOptions({ nifty: 0, banknifty: 25_000, sensex: null })).toHaveLength(14);
 		expect(
 			generateLadderOptions({ nifty: Number.NaN, banknifty: 25_000, sensex: null })
-		).toHaveLength(8);
+		).toHaveLength(14);
 	});
 
 	it('is deterministic — same anchors, same options in the same order', () => {

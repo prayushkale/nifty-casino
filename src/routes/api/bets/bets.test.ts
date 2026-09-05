@@ -14,6 +14,28 @@ import { getStore, resetStoreForTests } from '$lib/server/db';
 import type { Underlying } from '$lib/server/db/types';
 import { istAt } from '$lib/server/cas/test-clock';
 
+// The route opts into the live LTP fallback; the mock pins it to the fixture
+// closes so the strike distances (and the whole suite) stay deterministic and
+// network-free.
+vi.mock('$lib/server/ltp', async (importOriginal) => {
+	const mod = await importOriginal<typeof import('$lib/server/ltp')>();
+	const quote = (underlying: 'nifty' | 'banknifty' | 'sensex', value: number) => ({
+		underlying,
+		value,
+		changePts: 0,
+		changePct: 0,
+		prevClose: value
+	});
+	return {
+		...mod,
+		fetchLiveLtp: async () => ({
+			nifty: quote('nifty', 25_000),
+			banknifty: quote('banknifty', 56_000),
+			sensex: quote('sensex', 82_000)
+		})
+	};
+});
+
 const WEDNESDAY = '2026-08-26';
 const THURSDAY = '2026-08-27';
 const USER = '00000000-0000-4000-8000-00000000r001';
@@ -55,7 +77,7 @@ beforeEach(async () => {
 	});
 
 	vi.useFakeTimers({ toFake: ['Date'] });
-	vi.setSystemTime(new Date(istAt(THURSDAY, 15, 5, 0)));
+	vi.setSystemTime(new Date(istAt(THURSDAY, 15, 16, 0)));
 });
 
 afterEach(() => {
@@ -121,17 +143,17 @@ describe('POST /api/bets', () => {
 	});
 
 	it('maps the window, the market and the wallet to 409', async () => {
-		vi.setSystemTime(new Date(istAt(THURSDAY, 14, 59, 59)));
+		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 14, 59)));
 		expect(await post(nifty())).toMatchObject({ status: 409, body: { error: 'WINDOW_NOT_OPEN' } });
 
 		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 20, 1)));
 		expect(await post(nifty())).toMatchObject({ status: 409, body: { error: 'CUTOFF_PASSED' } });
 
-		vi.setSystemTime(new Date(istAt('2026-08-29', 15, 10, 0))); // Saturday
+		vi.setSystemTime(new Date(istAt('2026-08-29', 15, 18, 0))); // Saturday
 		expect(await post(nifty())).toMatchObject({ status: 409, body: { error: 'MARKET_CLOSED' } });
 
 		// Back inside the window, a stake the wallet cannot cover is still 409.
-		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 5, 0)));
+		vi.setSystemTime(new Date(istAt(THURSDAY, 15, 16, 0)));
 		expect(await post(nifty({ stake: SIGNUP_BONUS + 1 }))).toMatchObject({
 			status: 409,
 			body: { error: 'INSUFFICIENT_BALANCE', required: SIGNUP_BONUS + 1, available: SIGNUP_BONUS }

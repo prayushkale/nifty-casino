@@ -33,12 +33,16 @@ export const POST: RequestHandler = async ({ locals, request }) => {
 	const { body } = parsed;
 
 	try {
-		const bet = await placeBet(locals.userId, {
-			underlying: body.underlying,
-			targetKind: body.targetKind,
-			deltaPoints: body.deltaPoints,
-			stake: body.stake
-		});
+		const bet = await placeBet(
+			locals.userId,
+			{
+				underlying: body.underlying,
+				targetKind: body.targetKind,
+				deltaPoints: body.deltaPoints,
+				stake: body.stake
+			},
+			{ live: {} }
+		);
 		return json({ bet }, { status: 201, headers: BET_RESPONSE_HEADERS });
 	} catch (err: unknown) {
 		return betErrorResponse(err);

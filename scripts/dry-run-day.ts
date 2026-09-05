@@ -174,7 +174,9 @@ function cutoffMsFor(tradeDate: string): number {
 	return istHmsToUtcMs(istDateStrToMidnightUtcMs(tradeDate), CUTOFF_HMS);
 }
 
-/** 15:43:00 IST of `tradeDate` — the instant this fake day is settled at. */
+/**
+ * 15:30:00 IST of `tradeDate` — the instant this fake day is settled at.
+ */
 function settleMsFor(tradeDate: string): number {
 	return istHmsToUtcMs(istDateStrToMidnightUtcMs(tradeDate), SETTLE_START_HMS);
 }
@@ -548,8 +550,9 @@ async function main(): Promise<number> {
 				);
 				continue;
 			}
-			// 15:01–15:19 IST of the fake day, so the cutoff gate is judged for real.
-			const nowMs = cutoffAtMs - Math.floor(60_000 + rng() * 19 * 60_000);
+			// 15:15:01–15:19:59 IST of the fake day, so the cutoff gate is judged for
+			// real inside the (now 5-minute) participation window.
+			const nowMs = cutoffAtMs - Math.floor(1_000 + rng() * 4 * 60_000);
 
 			try {
 				const bet = await store.placeBet({

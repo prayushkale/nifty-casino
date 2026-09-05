@@ -1,11 +1,9 @@
 <script lang="ts">
 	import SubpageNav from '$lib/components/game/SubpageNav.svelte';
-	import { LADDER_CONFIG, LADDER_UNDERLYINGS } from '$lib/config/ladder';
+	import { MAX_HIT_ODDS } from '$lib/config/ladder';
 
-	/** Highest odds on the board, derived — this copy must never drift from the config. */
-	const maxOdds = Math.max(
-		...LADDER_UNDERLYINGS.flatMap((u) => Object.values(LADDER_CONFIG[u].odds))
-	);
+	/** Highest odds on the board — this copy must never drift from the config. */
+	const maxOdds = MAX_HIT_ODDS;
 
 	/** Short, static, honest. T13 may restyle it; the words stay plain on purpose. */
 	const terms: { heading: string; body: string }[] = [

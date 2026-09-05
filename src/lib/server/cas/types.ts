@@ -24,6 +24,13 @@ export type CasSource = 'nse' | 'bse';
  * `value` is the indicative close; `changePts`/`changePct` are measured against
  * the previous day's official close (matches NSE `icChange` semantics, which is
  * the game's anchor). `ts` is epoch ms — IST wall time is derived from it.
+ *
+ * `upstreamTs` is the exchange's OWN timestamp for the value (`timeVal` on NSE
+ * E1 rows, `dttm` on BSE rows), when one is carried and parseable. It is the
+ * freshness measurement for the whole feed: `ts - upstreamTs` = how old the
+ * exchange says the number is when we received it — the number that separates
+ * "our pipeline is slow" from "the exchange/CDN published it late". null when
+ * the feed carried no parseable time (freshness is then unmeasurable).
  */
 export type CasTickPayload = {
 	underlying: Underlying;
@@ -33,8 +40,82 @@ export type CasTickPayload = {
 	/** Previous day's official close, or null when the feed did not carry one. */
 	prevClose: number | null;
 	ts: number;
+	/** Exchange-side timestamp of the value (epoch ms), or null when not carried. */
+	upstreamTs: number | null;
 	source: CasSource;
 };
+
+/** IST = UTC+5:30, no DST — inlined so this module stays dependency-free. */
+const IST_OFFSET_MS = 330 * 60_000;
+
+const MONTHS: Record<string, number> = {
+	Jan: 0,
+	Feb: 1,
+	Mar: 2,
+	Apr: 3,
+	May: 4,
+	Jun: 5,
+	Jul: 6,
+	Aug: 7,
+	Sep: 8,
+	Oct: 9,
+	Nov: 10,
+	Dec: 11
+};
+
+/**
+ * Parse an IST wall-clock date-time into epoch ms, or null when unparseable.
+ * `day`/`mon`/`year` may be zero-padded; the result is exact to the second.
+ */
+function istPartsToEpochMs(
+	year: number,
+	month: number,
+	day: number,
+	hh: number,
+	mm: number,
+	ss: number
+): number | null {
+	if (
+		!Number.isFinite(year) ||
+		!Number.isFinite(month) ||
+		!Number.isFinite(day) ||
+		!Number.isFinite(hh) ||
+		!Number.isFinite(mm) ||
+		!Number.isFinite(ss)
+	) {
+		return null;
+	}
+	// Build UTC ms for the IST wall clock, then subtract the IST offset.
+	return Date.UTC(year, month, day, hh, mm, ss) - IST_OFFSET_MS;
+}
+
+/**
+ * Parse NSE E1 `timeVal` — IST "dd-MMM-yyyy HH:mm:ss" (e.g. "06-Aug-2026 15:30:00")
+ * — into epoch ms. Returns null for anything unexpected (never throws, never guesses).
+ */
+export function parseNseTimeVal(raw: unknown): number | null {
+	if (typeof raw !== 'string') return null;
+	const m = /^(\d{1,2})-([A-Za-z]{3})-(\d{4})[ T](\d{2}):(\d{2}):(\d{2})$/.exec(raw.trim());
+	if (!m) return null;
+	const month = MONTHS[m[2]];
+	if (month === undefined) return null;
+	return istPartsToEpochMs(+m[3], month, +m[1], +m[4], +m[5], +m[6]);
+}
+
+/**
+ * Parse BSE `dttm` — IST "dd MMM yy | HH:mm" (e.g. "06 Aug 26 | 13:38") — into
+ * epoch ms, seconds defaulted to 0 (BSE does not carry them). Returns null for
+ * anything unexpected.
+ */
+export function parseBseDttm(raw: unknown): number | null {
+	if (typeof raw !== 'string') return null;
+	const m = /^(\d{1,2}) ([A-Za-z]{3}) (\d{2}) \| (\d{2}):(\d{2})$/.exec(raw.trim());
+	if (!m) return null;
+	const month = MONTHS[m[2]];
+	if (month === undefined) return null;
+	// BSE uses a 2-digit year; NSE-style quotes are all 2000+ so this is exact.
+	return istPartsToEpochMs(2000 + +m[3], month, +m[1], +m[4], +m[5], 0);
+}
 
 /** NSE index names feeding each underlying (SENSEX is BSE — never in this map). */
 export const NSE_INDEX_NAME_BY_UNDERLYING: Partial<Record<Underlying, string>> = {
@@ -118,6 +199,7 @@ export function extractNseCasTick(
 		changePct: casNum(row.icPerChange) ?? 0,
 		prevClose: positiveOrNull(row.previousClose),
 		ts,
+		upstreamTs: parseNseTimeVal(row.timeVal),
 		source: 'nse'
 	};
 }
@@ -193,7 +275,101 @@ export function extractNseMarketStatusNiftyTick(
 		changePct: ind.perChange,
 		prevClose: null,
 		ts,
+		// E3 carries no timestamp of its own — the E1 tick is the freshness source.
+		upstreamTs: null,
 		source: 'nse'
+	};
+}
+
+// ---------------------------------------------------------------------------
+// LTP — last traded price (the pre-auction display + the 15:15 betting anchor)
+// ---------------------------------------------------------------------------
+
+/**
+ * One normalized LTP observation. Same display shape as `CasTickPayload` minus
+ * the indicatives: `value` is the LAST TRADED price of the regular session (NSE
+ * E1 `last`, BSE `ltp`), and `changePts`/`changePct` are measured against the
+ * previous day's close. Unlike the CAS ticks, the LTP is available all day — it
+ * is what a visitor sees on page load and the price the 15:15:01 anchor freezes.
+ */
+export type LtpQuote = {
+	underlying: Underlying;
+	value: number;
+	changePts: number;
+	changePct: number;
+	/** Previous day's official close, or null when the feed did not carry one. */
+	prevClose: number | null;
+	ts: number;
+	source: CasSource;
+};
+
+/** Change vs a positive prevClose, or zeros when no reference was carried. */
+function changeAgainst(
+	value: number,
+	prevClose: number | null
+): { changePts: number; changePct: number } {
+	if (prevClose === null || !(prevClose > 0)) return { changePts: 0, changePct: 0 };
+	const changePts = Math.round((value - prevClose) * 100) / 100;
+	return { changePts, changePct: Math.round((changePts / prevClose) * 10_000) / 100 };
+}
+
+/**
+ * Extract the normalized LTP for one NSE index from the RAW E1 response. The
+ * `last` field publishes all day (unlike `indicativeClose`, which is 0 outside
+ * the CAS window), so this works at any hour. Returns null when the row is
+ * missing or `last` is absent/zero — never a fabricated price.
+ */
+export function extractNseLtp(
+	raw: unknown,
+	underlying: Underlying,
+	ts: number = Date.now()
+): LtpQuote | null {
+	const indexName = NSE_INDEX_NAME_BY_UNDERLYING[underlying];
+	if (!indexName) return null; // SENSEX is a BSE index — not in the E1 feed
+	const row = asRowArray(raw).find((r) => r.indexName === indexName);
+	if (!row) return null;
+	const value = positiveOrNull(row.last);
+	if (value === null) return null;
+	const prevClose = positiveOrNull(row.previousClose);
+	const change = changeAgainst(value, prevClose);
+	return { underlying, value, ...change, prevClose, ts, source: 'nse' };
+}
+
+/**
+ * Extract the normalized SENSEX LTP from the RAW BSE GetSensexDatanew response
+ * (`ltp`, which — unlike `iclsprice` — carries a real price all day).
+ */
+export function extractBseLtp(raw: unknown, ts: number = Date.now()): LtpQuote | null {
+	const rows = Array.isArray(raw) ? raw.filter(isRecord) : [];
+	const row = rows.find((r) => r.indxnm === BSE_SENSEX_INDEX_NAME);
+	if (!row) return null;
+	const value = bseNum(row.ltp as string | number | null | undefined);
+	if (!(value > 0)) return null;
+	const prevClose = positiveOrNull(row.Prev_Close);
+	// BSE carries its own signed point change (`chg`); fall back to arithmetic.
+	const carried = bseNum(row.chg as string | number | null | undefined);
+	const changePts = carried !== 0 ? carried : changeAgainst(value, prevClose).changePts;
+	const changePct =
+		bseNum(row.perchg as string | number | null | undefined) !== 0
+			? bseNum(row.perchg as string | number | null | undefined)
+			: changeAgainst(value, prevClose).changePct;
+	return { underlying: 'sensex', value, changePts, changePct, prevClose, ts, source: 'bse' };
+}
+
+/** Both feeds at once, stamped with one instant. Either side may fail to null. */
+export function extractLtpQuotes(
+	nseRaw: unknown,
+	bseRaw: unknown,
+	ts: number = Date.now()
+): {
+	nifty: LtpQuote | null;
+	banknifty: LtpQuote | null;
+	sensex: LtpQuote | null;
+} {
+	return {
+		nifty: extractNseLtp(nseRaw, 'nifty', ts),
+		banknifty: extractNseLtp(nseRaw, 'banknifty', ts),
+		sensex: extractBseLtp(bseRaw, ts)
 	};
 }
 
@@ -230,6 +406,7 @@ export function extractBseCasTick(raw: unknown, ts: number = Date.now()): CasTic
 		changePct: bseNum(row.iclsPchg as string | number | null | undefined),
 		prevClose: positiveOrNull(row.Prev_Close),
 		ts,
+		upstreamTs: parseBseDttm(row.dttm as string | undefined),
 		source: 'bse'
 	};
 }

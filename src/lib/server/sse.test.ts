@@ -19,6 +19,7 @@ function payload(ts: number, value = 25000): CasTickPayload {
 		changePct: 0.05,
 		prevClose: 24988,
 		ts,
+		upstreamTs: null,
 		source: 'nse'
 	};
 }

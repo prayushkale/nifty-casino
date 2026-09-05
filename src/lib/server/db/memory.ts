@@ -561,6 +561,15 @@ export class MemoryStore implements GameStore {
 			this.closesByKey.set(key, { ...close });
 			return true;
 		},
+		// The LTP anchor replaces a live_approx fallback row but never an official one.
+		upsertIndexLtpAnchor: async (close) => {
+			const key = tickKey(close.tradeDate, close.underlying);
+			const existing = this.closesByKey.get(key);
+			if (existing?.source === 'official') return false;
+			if (existing?.source === 'ltp_anchor') return false;
+			this.closesByKey.set(key, { ...close, source: 'ltp_anchor' });
+			return true;
+		},
 		getIndexCloses: async (tradeDate) =>
 			[...this.closesByKey.values()]
 				.filter((c) => c.tradeDate === tradeDate)

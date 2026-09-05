@@ -16,12 +16,7 @@
 	} from 'lightweight-charts';
 	import type { StateBet } from '$lib/server/state';
 	import type { LadderOption, LadderUnderlying } from '$lib/config/ladder';
-	import {
-		AUCTION_END_HMS,
-		AUCTION_START_HMS,
-		BETTING_START_HMS,
-		COSMETIC_INTERPOLATION
-	} from '$lib/config/app';
+	import { BETTING_START_HMS, COSMETIC_INTERPOLATION } from '$lib/config/app';
 	import { signedTargetPoints } from '$lib/game/tier';
 	import {
 		CHART_COLORS,
@@ -33,7 +28,6 @@
 		ticksToChartPoints,
 		type CasPoint
 	} from '$lib/game/chart';
-	import { FixedGridlinePrimitive } from './gridlines';
 	import { theme } from '$lib/stores/theme';
 	import {
 		formatNC,
@@ -42,13 +36,7 @@
 		type CasLiveValue,
 		type GamePhase
 	} from '$lib/stores/game';
-	import {
-		hmsToSeconds,
-		istDateStr,
-		istDateStrToMidnightUtcMs,
-		istHmsToUtcMs,
-		secOfDayIst
-	} from '$lib/time/ist';
+	import { hmsToSeconds, secOfDayIst } from '$lib/time/ist';
 	import Skeleton from './Skeleton.svelte';
 
 	/**
@@ -72,6 +60,13 @@
 	export let ticks: CasPoint[] = [];
 	/** The freshest display payload — the big number in the card header. */
 	export let latest: CasLiveValue | null = null;
+	/**
+	 * The last traded price (see `$lib/stores/ltp`). Before the cash session opens
+	 * at 15:20 this is the ONLY thing the chart draws — a single point, never a
+	 * line. Once CAS ticks arrive they draw FROM this point, so the cash line
+	 * visibly grows out of the price the market actually stopped at.
+	 */
+	export let ltp: { value: number; ts: number } | null = null;
 	/** Previous day's official close: the anchor every target line is measured from. */
 	export let anchor: number | null = null;
 	/** The player's active bet on this index, if any. Drives the target line + the strip. */
@@ -83,7 +78,6 @@
 	 */
 	export let selectedOption: LadderOption | null = null;
 	export let phase: GamePhase = 'pre';
-	export let tradeDate: string | null = null;
 	export let isTheater = false;
 	export let isFullscreen = false;
 	export let displayHeight: number | null = null;
@@ -91,18 +85,6 @@
 		theater: { on: boolean };
 		fullscreen: { on: boolean };
 	}>();
-
-	/**
-	 * Default y-axis gridline step per index. The user asked for Nifty's y-axis
-	 * lines 50 points apart, BankNifty 100, Sensex 150. lightweight-charts has no
-	 * exact-interval option (its engine only emits "nice" steps), so the horizontal
-	 * gridlines are drawn by `FixedGridlinePrimitive` at exactly these steps.
-	 */
-	const PRICE_TICK_STEP: Record<LadderUnderlying, number> = {
-		nifty: 50,
-		banknifty: 100,
-		sensex: 150
-	};
 
 	/** Chart height — a 3-across desktop card and a stacked mobile card share it. */
 	const HEIGHT = 220;
@@ -113,8 +95,6 @@
 	let container: HTMLDivElement | null = null;
 	let chart: IChartApi | null = null;
 	let series: ISeriesApi<'Line'> | null = null;
-	/** The fixed-spacing gridline primitive, so a theme flip can recolor it. */
-	let gridlinePrimitive: FixedGridlinePrimitive | null = null;
 	/** Price lines we own, so a change in the bet set removes exactly the stale ones. */
 	let priceLines: { key: string; line: IPriceLine }[] = [];
 	/** Set once the chart exists — flips the placeholder off. */
@@ -142,41 +122,35 @@
 	})();
 	$: showAwaiting = frozen && isAfter15;
 
-	function syntheticAnchorPoints(
-		anchorValue: number,
-		tDate: string | null
-	): ReturnType<typeof ticksToChartPoints> {
-		if (anchorValue === null || !Number.isFinite(anchorValue) || anchorValue <= 0) return [];
-		let dateStr = tDate;
-		if (!dateStr) {
-			try {
-				dateStr = istDateStr(new Date());
-			} catch {
-				return [];
-			}
-		}
-		try {
-			const midnight = istDateStrToMidnightUtcMs(dateStr);
-			const start = Math.floor(istHmsToUtcMs(midnight, AUCTION_START_HMS) / 1000);
-			const end = Math.floor(istHmsToUtcMs(midnight, AUCTION_END_HMS) / 1000);
-			return [
-				{ time: start, value: anchorValue },
-				{ time: end, value: anchorValue }
-			];
-		} catch {
-			return [];
-		}
-	}
-
-	$: syntheticPoints =
-		points.length === 0 && anchor !== null && Number.isFinite(anchor) && anchor > 0
-			? syntheticAnchorPoints(anchor, tradeDate)
+	/**
+	 * The LTP as the chart's FIRST point. Before 15:20 it is the only point (the
+	 * chart deliberately draws no line from it — one dot at the price the spot
+	 * market actually stopped at); after, the CAS ticks extend the line from here.
+	 * A missing/never-stamped LTP renders nothing, never a guessed point.
+	 */
+	$: anchorPoints =
+		ltp !== null &&
+		Number.isFinite(ltp.value) &&
+		ltp.value > 0 &&
+		Number.isFinite(ltp.ts) &&
+		ltp.ts > 0
+			? [{ time: Math.floor(ltp.ts / 1000) as UTCTimestamp, value: ltp.value }]
 			: [];
-	$: displayPoints = points.length > 0 ? points : syntheticPoints;
-	$: hasSynthetic = syntheticPoints.length > 0;
-	$: headerValue = latestValue !== null ? latestValue : hasSynthetic ? anchor : null;
-	$: headerChange = changePts !== null ? changePts : hasSynthetic ? 0 : null;
-	$: headerDirection = points.length > 0 ? direction : hasSynthetic ? 'flat' : direction;
+	$: displayPoints = points.length > 0 ? [...anchorPoints, ...points] : anchorPoints;
+	$: hasLtpPoint = anchorPoints.length > 0;
+	$: headerValue =
+		latestValue !== null ? latestValue : hasLtpPoint && ltp !== null ? ltp.value : null;
+	$: headerChange = changePts !== null ? changePts : hasLtpPoint && ltp !== null ? 0 : null;
+	$: headerDirection =
+		points.length > 0
+			? direction
+			: headerChange === null
+				? 'flat'
+				: headerChange > 0
+					? 'up'
+					: headerChange < 0
+						? 'down'
+						: 'flat';
 	$: headerLineColor =
 		headerDirection === 'up'
 			? palette.up
@@ -399,19 +373,11 @@
 			height: effectiveHeight,
 			layout: {
 				background: { type: ColorType.Solid, color: palette.background },
-				textColor: palette.text,
-				fontSize: 11,
-				fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace'
+				textColor: palette.text
 			},
 			grid: {
 				vertLines: { color: palette.grid },
-				// The primitive draws the horizontal (price) gridlines at an exact
-				// per-index step; hide the engine's fixed-"nice"-step ones so they
-				// never double up with a different spacing.
-				horzLines: {
-					color: palette.grid,
-					visible: false
-				}
+				horzLines: { color: palette.grid }
 			},
 			rightPriceScale: {
 				visible: true,
@@ -445,14 +411,14 @@
 			color: lineColor,
 			priceLineVisible: false,
 			lastValueVisible: true,
+			// The lone 15:15 LTP point is an isolated marker until the first cash tick
+			// connects to it — the marker is what makes a one-point chart a point.
+			pointMarkersVisible: true,
 			priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
 			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			autoscaleInfoProvider: (centeringProvider as any) ?? undefined
 		});
 		series.setData([]);
-
-		gridlinePrimitive = new FixedGridlinePrimitive(PRICE_TICK_STEP[underlying], palette.grid);
-		series.attachPrimitive(gridlinePrimitive);
 
 		chart.subscribeCrosshairMove((param) => {
 			const bar = param.seriesData.get(series as ISeriesApi<'Line'>) as
@@ -474,7 +440,6 @@
 			chart?.remove();
 			chart = null;
 			series = null;
-			gridlinePrimitive = null;
 			priceLines = [];
 			ready = false;
 			crosshair = null;
@@ -515,7 +480,6 @@
 				// eslint-disable-next-line no-empty
 			} catch {}
 		}
-		gridlinePrimitive?.setColor(palette.grid);
 	}
 
 	$: if (chart && series && centeringProvider) {
@@ -615,18 +579,16 @@
 				class="absolute inset-0 flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed bg-zinc-50 px-3 text-center dark:border-felt-700 dark:bg-felt-900"
 			>
 				{#if displayPoints.length === 0 && !showAwaiting}
-					<!-- No ticks and no anchor yet (slow ladder read): shimmer first, then hand the surface to the chart. -->
+					<!-- No LTP point and no cash ticks yet (slow ladder read): shimmer first, then hand the surface to the chart. -->
 					<Skeleton variant="block" height={64} label="Loading the {label} chart" />
 				{/if}
 				<p class="text-xs leading-relaxed text-zinc-500 dark:text-zinc-600">
 					{#if displayPoints.length === 0}
 						{showAwaiting
 							? 'No indicative ticks recorded for today.'
-							: hasSynthetic
-								? `Showing previous close ${formatIndexLevel(anchor ?? 0)} — live ticks from 15:13:30 IST`
-								: 'Waiting for the auction’s first indicative tick…'}
-					{:else if hasSynthetic}
-						Showing previous close — live ticks from 15:13:30 IST
+							: 'Waiting for the last traded price…'}
+					{:else if points.length === 0}
+						Last traded price — the cash-session line starts here at 15:20 IST
 					{:else}
 						Loading chart…
 					{/if}

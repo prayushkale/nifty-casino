@@ -28,12 +28,17 @@ export const PATCH: RequestHandler = async ({ locals, params, request }) => {
 	const { body } = parsed;
 
 	try {
-		const bet = await editBet(locals.userId, params.id, {
-			// An absent field stays `undefined`, which the service reads as "unchanged".
-			targetKind: body.targetKind,
-			deltaPoints: body.deltaPoints,
-			stake: body.stake
-		});
+		const bet = await editBet(
+			locals.userId,
+			params.id,
+			{
+				// An absent field stays `undefined`, which the service reads as "unchanged".
+				targetKind: body.targetKind,
+				deltaPoints: body.deltaPoints,
+				stake: body.stake
+			},
+			{ live: {} }
+		);
 		return json({ bet }, { status: 200, headers: BET_RESPONSE_HEADERS });
 	} catch (err: unknown) {
 		return betErrorResponse(err);

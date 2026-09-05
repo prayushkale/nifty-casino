@@ -7,11 +7,38 @@
 export const APP_TIMEZONE_OFFSET_MIN = 330;
 
 /**
- * Bet placement OPENS here, IST (PLAN §0: the participation window is
- * 15:00 → 15:20:00). Before this the day's session is not accepting bets.
- * The cutoff is {@link CUTOFF_HMS}; both ends are inclusive.
+ * Bet placement OPENS here, IST — 15:15:01, one second after the spot market's
+ * last print, because the LTP captured at {@link LTP_ANCHOR_HMS} is the anchor
+ * every rung is measured from. Bets before that instant would hang off an anchor
+ * that has not been set yet. The cutoff is {@link CUTOFF_HMS}.
  */
-export const BETTING_START_HMS = { h: 15, m: 0, s: 0 } as const;
+export const BETTING_START_HMS = { h: 15, m: 15, s: 0 } as const;
+
+/**
+ * The last-traded-price (LTP) display starts REFRESHING here, IST. Before 15:00
+ * a page load fetches the LTP once and it sits still; from 15:00 the client
+ * re-reads it every {@link LTP_REFRESH_MS}.
+ */
+export const LTP_REFRESH_START_HMS = { h: 15, m: 0, s: 0 } as const;
+
+/**
+ * The ONE final LTP load, IST. After this the spot market has stopped, the price
+ * is static, and the value captured here is persisted as the day's betting
+ * anchor (`index_closes.source = 'ltp_anchor'`) — the point every bet, target
+ * line and the post-15:20 cash chart is measured from. The cash (CAS) session
+ * itself begins at 15:20.
+ */
+export const LTP_ANCHOR_HMS = { h: 15, m: 15, s: 1 } as const;
+
+/** How often the client refreshes the LTP between 15:00 and 15:15:01 (ms). */
+export const LTP_REFRESH_MS = 30_000;
+
+/**
+ * Server-side LTP cache TTL (ms). The client cadence is {@link LTP_REFRESH_MS},
+ * but a hundred open tabs must still cost NSE one fetch per TTL — 20s keeps at
+ * most 3 upstream hits a minute no matter how many players are watching.
+ */
+export const LTP_SERVER_CACHE_MS = 20_000;
 
 /** Bet placement closes exactly here (inclusive up to this instant), IST. */
 export const CUTOFF_HMS = { h: 15, m: 20, s: 0 } as const;
@@ -25,8 +52,11 @@ export const AUCTION_END_HMS = { h: 15, m: 42, s: 0 } as const;
 /** Virtual chips credited on signup. Play-money only. */
 export const SIGNUP_BONUS = 1000;
 
-/** Upstream NSE/BSE poll cadence on our server (ms). Never poll faster client-side. */
-export const POLL_MS = 4000;
+/** Upstream NSE/BSE poll cadence on our server (ms). 2s halves the pipeline's
+ *  contribution to end-to-end lag versus the old 4s; if Akamai ever shows
+ *  AUTH/BLOCKED pressure in-window, revert to 4000 (or step 3000) here — the
+ *  poller needs no other change. Never poll faster client-side. */
+export const POLL_MS = 2000;
 
 /** Idle SSE connections from hidden tabs are dropped after this long. */
 export const SSE_IDLE_TIMEOUT_MS = 10 * 60_000;
@@ -39,10 +69,10 @@ export const RING_BUFFER_CAP = 720;
 
 /**
  * A feed is "stale" when the newest tick is older than this while the auction is
- * live — drives the client staleness banner (Task 12). Upstream polls at 4s, so
- * three missed polls is the threshold before a user should be told.
+ * live — drives the client staleness banner (Task 12). Upstream polls at 2s, so
+ * four missed polls is the threshold before a user should be told.
  */
-export const CAS_STALE_MS = 12_000;
+export const CAS_STALE_MS = 8_000;
 
 /**
  * Client cadence for the REST fallback (`GET /api/cas/all`) used only when the
@@ -51,7 +81,7 @@ export const CAS_STALE_MS = 12_000;
  * notice — and it is a FALLBACK: an SSE client costs the origin one snapshot per
  * reconnect, a polling client one snapshot every one of these.
  */
-export const CAS_FALLBACK_POLL_MS = 8000;
+export const CAS_FALLBACK_POLL_MS = 4000;
 
 /**
  * Two `EventSource` errors inside this window means the stream is not coming
@@ -128,13 +158,21 @@ export const LEADERBOARD_CACHE_TTL_MS = 30_000;
 // ---------------------------------------------------------------------------
 
 /**
- * Official-close capture + settlement may first fire here, IST — one minute after
- * {@link AUCTION_END_HMS}, so a nominal 15:42:00 finish is already on disk. The
- * capture itself still refuses to run before 15:42 and the scheduler keeps
- * re-checking until {@link SETTLE_END_HMS}, which is what absorbs an auction
- * extension (PLAN §6 R2): closes that are not there yet are retried, never guessed.
+ * The exchange's regular-session close, IST. The final index prices freeze in the
+ * feeds at this instant (NSE E1 `last`, BSE `ltp` — both carry `15:30` timestamps
+ * after it) and settlement may first fire here: bets are already locked at
+ * {@link CUTOFF_HMS} 15:20, so settling at the close cannot race a late bet. The
+ * capture prefers the exchange's indicative-close fields but falls back to this
+ * frozen LTP when they have been zeroed out, and the scheduler keeps re-checking
+ * until {@link SETTLE_END_HMS}.
  */
-export const SETTLE_START_HMS = { h: 15, m: 43, s: 0 } as const;
+export const MARKET_CLOSE_HMS = { h: 15, m: 30, s: 0 } as const;
+
+/**
+ * Official-close capture + settlement may first fire here, IST — exactly at the
+ * market close, so the moment the final 15:30 price lands the day settles.
+ */
+export const SETTLE_START_HMS = MARKET_CLOSE_HMS;
 
 /**
  * Last instant the settlement window stays open, IST (inclusive). Past this the
@@ -146,9 +184,10 @@ export const SETTLE_END_HMS = { h: 17, m: 0, s: 0 } as const;
 /**
  * Re-check cadence inside the settlement window (ms). A cycle that finds the
  * official closes missing (or only some of them) waits this long and tries again
- * rather than settling on a live indicative.
+ * rather than settling on a live indicative. Kept tight so the reward lands the
+ * moment the final price appears.
  */
-export const SETTLE_RETRY_MS = 60_000;
+export const SETTLE_RETRY_MS = 30_000;
 
 /** Re-check cadence outside the settlement window (ms) — do not hammer timers for 22h. */
 export const SETTLE_IDLE_RECHECK_MS = 30_000;

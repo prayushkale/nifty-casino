@@ -7,7 +7,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-	LADDER_CONFIG,
+	MAX_HIT_ODDS,
 	LADDER_UNDERLYINGS,
 	generateLadderOptions,
 	type LadderTargetKind,
@@ -65,7 +65,7 @@ describe('getLadderForDate', () => {
 		expect(ladder.tradeDate).toBe(THURSDAY);
 		expect(ladder.anchors).toEqual({ nifty: 25_000, banknifty: 56_000, sensex: 82_000 });
 		expect(ladder.options).toEqual(generateLadderOptions(ladder.anchors));
-		expect(ladder.options).toHaveLength(24);
+		expect(ladder.options).toHaveLength(94);
 		expect(ladder.generatedAt).toBeGreaterThan(0);
 	});
 
@@ -74,7 +74,7 @@ describe('getLadderForDate', () => {
 		const ladder = await getLadderForDate(store, MONDAY);
 
 		expect(ladder.anchors).toEqual(LAUNCH_ANCHORS);
-		expect(ladder.options).toHaveLength(24);
+		expect(ladder.options).toHaveLength(94);
 	});
 
 	it('serves Saturday and Sunday too — nothing bets on them, but the ladder is answerable', async () => {
@@ -84,7 +84,7 @@ describe('getLadderForDate', () => {
 			const ladder = await getLadderForDate(store, weekendDay);
 			// Saturday's walk-back lands on Friday directly; Sunday skips Saturday too.
 			expect(ladder.anchors, weekendDay).toEqual(LAUNCH_ANCHORS);
-			expect(ladder.options, weekendDay).toHaveLength(24);
+			expect(ladder.options, weekendDay).toHaveLength(94);
 		}
 	});
 
@@ -168,7 +168,7 @@ describe('getLadderForDate', () => {
 		const ladder = await getLadderForDate(store, THURSDAY);
 
 		expect(ladder.anchors).toEqual({ nifty: 25_000, banknifty: null, sensex: null });
-		expect(ladder.options).toHaveLength(8);
+		expect(ladder.options).toHaveLength(30);
 		expect(ladder.options.every((o) => o.underlying === 'nifty')).toBe(true);
 	});
 
@@ -187,7 +187,15 @@ describe('getLadderForDate', () => {
 
 		expect(ladder.anchors.banknifty).toBe(10_000);
 		const banknifty = ladder.options.filter((o) => o.underlying === 'banknifty');
-		expect(banknifty.map((o) => o.deltaPoints)).toEqual([100, 100, 200, 200, 300, 300]);
+		// CE strikes first (10,100/10,200/10,300), then the PE mirrors below 10,000.
+		expect(banknifty.map((o) => [o.targetKind, o.deltaPoints])).toEqual([
+			['up', 100],
+			['up', 200],
+			['up', 300],
+			['down', 100],
+			['down', 200],
+			['down', 300]
+		]);
 		expect(banknifty.filter((o) => o.deltaPoints === 400)).toHaveLength(0);
 	});
 
@@ -203,7 +211,7 @@ describe('getLadderForDate', () => {
 		const second = await getLadderForDate(store, THURSDAY);
 		expect(second).not.toBe(first);
 		expect(second.anchors.nifty).toBe(30_000);
-		expect(second.options.filter((o) => o.underlying === 'nifty')).toHaveLength(8);
+		expect(second.options.filter((o) => o.underlying === 'nifty')).toHaveLength(36);
 		expect(second.generatedAt).toBeGreaterThanOrEqual(first.generatedAt);
 	});
 
@@ -212,7 +220,7 @@ describe('getLadderForDate', () => {
 		for (let day = 10; day < 20; day += 1) {
 			await getLadderForDate(store, `2026-09-${String(day).padStart(2, '0')}`);
 		}
-		expect((await getLadderForDate(store, THURSDAY)).options).toHaveLength(24);
+		expect((await getLadderForDate(store, THURSDAY)).options).toHaveLength(94);
 	});
 });
 
@@ -221,7 +229,7 @@ describe('resolveLadderOption', () => {
 		const store = await ladderStore(THURSDAY, WEDNESDAY);
 		const { options } = await getLadderForDate(store, THURSDAY);
 
-		expect(options).toHaveLength(24);
+		expect(options).toHaveLength(94);
 		for (const option of options) {
 			const resolved = await resolveLadderOption(
 				THURSDAY,
@@ -233,16 +241,18 @@ describe('resolveLadderOption', () => {
 			expect(resolved, `${option.underlying} ${option.targetKind} ${option.deltaPoints}`).toEqual(
 				option
 			);
-			expect(resolved?.odds).toBe(LADDER_CONFIG[option.underlying].odds[option.deltaPoints]);
+			expect(resolved?.odds).toBe(MAX_HIT_ODDS);
 		}
 	});
 
 	it('rejects a pick that is not on today’s ladder', async () => {
 		const store = await ladderStore(THURSDAY, WEDNESDAY);
 
-		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', 75, store)).toBeNull(); // not a step
-		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', 300, store)).toBeNull(); // nifty stops at 200
-		expect(await resolveLadderOption(THURSDAY, 'sensex', 'up', 300, store)).toBeNull(); // sensex has no 300
+		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', 30, store)).toBeNull(); // not a spacing multiple
+		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', 800, store)).toBeNull(); // beyond the ±3% band
+		// Off the 82,000 anchor the sensex CE distances run 200/350/500 … — 450 is
+		// not a strike distance (the strikes are round 150-multiples, the anchor is not).
+		expect(await resolveLadderOption(THURSDAY, 'sensex', 'up', 450, store)).toBeNull();
 		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', -50, store)).toBeNull(); // sign is targetKind's job
 		expect(
 			await resolveLadderOption(THURSDAY, 'nifty', 'sideways' as LadderTargetKind, 50, store)

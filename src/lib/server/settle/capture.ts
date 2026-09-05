@@ -20,21 +20,23 @@
  * lives in ../settle/scheduler, which owns the clock; keeping the two apart is what
  * lets tests inject a fetcher and a `now` without a timer in sight.
  */
-import { AUCTION_END_HMS } from '$lib/config/app';
+import { MARKET_CLOSE_HMS } from '$lib/config/app';
 import { LADDER_UNDERLYINGS, round2 } from '$lib/config/ladder';
 import { istDateStr, istDateStrToMidnightUtcMs, istHmsToUtcMs } from '$lib/time/ist';
 import { fetchBseSensexRows } from '$lib/server/cas/bse-api';
 import { fetchIndexData, fetchMarketStatus } from '$lib/server/cas/nse-api';
 import {
 	extractBseCasTick,
+	extractBseLtp,
 	extractNseCasTicks,
+	extractNseLtp,
 	extractNseMarketStatusIndicative
 } from '$lib/server/cas/types';
 import type { GameStore } from '$lib/server/db';
 import type { CloseSource, Underlying } from '$lib/server/db/types';
 
 /** Where an official close came from — provenance for a number money moves against. */
-export type CloseOrigin = 'nse-e1' | 'nse-e3' | 'bse';
+export type CloseOrigin = 'nse-e1' | 'nse-e3' | 'bse' | 'nse-e1-ltp' | 'bse-ltp';
 
 /**
  * The three upstream reads, injectable so tests (and a dry-run script) never touch
@@ -55,9 +57,13 @@ export const realOfficialCloseFetchers: OfficialCloseFetchers = {
 	fetchBseSensexRows
 };
 
-/** 15:42:00 IST of `tradeDate`, in epoch ms — the earliest instant a close may be believed. */
-export function auctionEndMsFor(tradeDate: string): number {
-	return istHmsToUtcMs(istDateStrToMidnightUtcMs(tradeDate), AUCTION_END_HMS);
+/**
+ * 15:30:00 IST of `tradeDate`, in epoch ms — the market close. From this instant
+ * the final prices are frozen in the feeds, so the scheduler and a manual
+ * `settleNow` may capture from here on.
+ */
+export function marketCloseMsFor(tradeDate: string): number {
+	return istHmsToUtcMs(istDateStrToMidnightUtcMs(tradeDate), MARKET_CLOSE_HMS);
 }
 
 /** A number a payout may be computed from. Everything else means "not yet". */
@@ -93,8 +99,8 @@ const CROSS_CHECK_TOLERANCE = 0.001;
  * `index_closes` as `source: 'official'`.
  *
  * Guarantees, in order of importance:
- *  • refuses outright before 15:42:00 IST of the trade date (the auction is still
- *    running; a close captured now would be wrong, and we do not get to redo it)
+ *  • refuses outright before 15:30:00 IST of the trade date (the market is still
+ *    open; a close captured now would be wrong, and we do not get to redo it)
  *  • writes ONLY positive finite values, and only the ones it actually extracted
  *  • never overwrites a row that is already `official` (a re-run is a no-op, not a
  *    revision), but still counts such an underlying as captured
@@ -122,7 +128,7 @@ export async function captureOfficialCloses(
 	// 03:00 IST is past the auction end of ITS trade date and may legitimately
 	// re-read the closes (that is the manual `settleNow` path), while a call at
 	// 15:41:59 must not.
-	if (now.getTime() < auctionEndMsFor(tradeDate)) {
+	if (now.getTime() < marketCloseMsFor(tradeDate)) {
 		return { ...report, reason: 'BEFORE_AUCTION_END' };
 	}
 	report.attempted = true;
@@ -132,17 +138,17 @@ export async function captureOfficialCloses(
 	const seen = new Map<Underlying, { close: number; origin: CloseOrigin }>();
 	const offer = (underlying: Underlying, close: number, origin: CloseOrigin): void => {
 		if (!usableClose(close)) return; // 0 / NaN / negative = "not published yet"
-		const existing = seen.get(underlying);
-		if (existing) return;
+		if (seen.has(underlying)) return; // the earlier (indicative) read wins
 		seen.set(underlying, { close: round2(close), origin });
 	};
 
 	const ts = now.getTime();
 
-	// E1 — the primary read for NIFTY 50 and NIFTY BANK.
+	// E1 — the primary read for NIFTY 50 and NIFTY BANK (kept for the LTP fallback).
+	let nseRaw: unknown = null;
 	try {
-		const raw = await fetchers.fetchNseIndexData();
-		for (const tick of extractNseCasTicks(raw, ts)) {
+		nseRaw = await fetchers.fetchNseIndexData();
+		for (const tick of extractNseCasTicks(nseRaw, ts)) {
 			offer(tick.underlying, tick.value, 'nse-e1');
 		}
 	} catch (err: unknown) {
@@ -171,13 +177,30 @@ export async function captureOfficialCloses(
 		report.errors.push(`nse-e3: ${errorMessage(err)}`);
 	}
 
-	// BSE — the only source for SENSEX.
+	// BSE — the only source for SENSEX (kept for the LTP fallback).
+	let bseRaw: unknown = null;
 	try {
-		const raw = await fetchers.fetchBseSensexRows();
-		const tick = extractBseCasTick(raw, ts);
+		bseRaw = await fetchers.fetchBseSensexRows();
+		const tick = extractBseCasTick(bseRaw, ts);
 		if (tick) offer('sensex', tick.value, 'bse');
 	} catch (err: unknown) {
 		report.errors.push(`bse: ${errorMessage(err)}`);
+	}
+
+	// Closing-LTP fallback: the indicative-close fields are zeroed out by both
+	// exchanges within minutes of the CAS window ending, but the last-traded price
+	// freezes at the 15:30 close and stays in the feed. It IS the final price —
+	// use it for anything the indicatives did not provide.
+	if (nseRaw !== null) {
+		for (const underlying of ['nifty', 'banknifty'] as const) {
+			if (seen.has(underlying)) continue;
+			const quote = extractNseLtp(nseRaw, underlying, ts);
+			if (quote) offer(underlying, quote.value, 'nse-e1-ltp');
+		}
+	}
+	if (bseRaw !== null) {
+		const quote = extractBseLtp(bseRaw, ts);
+		if (quote) offer('sensex', quote.value, 'bse-ltp');
 	}
 
 	// What is already official stays official: `upsertIndexClose` would overwrite it
