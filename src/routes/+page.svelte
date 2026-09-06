@@ -218,6 +218,28 @@
 		name="description"
 		content="Forecast how NIFTY 50, BANKNIFTY and SENSEX close in SEBI's Closing Auction Session. Play-money chips, 15:15–15:20 IST daily."
 	/>
+	<link rel="canonical" href="https://niftycasino.niftychronicles.com/" />
+
+	<meta property="og:type" content="website" />
+	<meta property="og:site_name" content="NiftyCASino" />
+	<meta property="og:url" content="https://niftycasino.niftychronicles.com/" />
+	<meta property="og:title" content="NiftyCASino — call the closing auction" />
+	<meta
+		property="og:description"
+		content="Forecast how NIFTY 50, BANKNIFTY and SENSEX close in SEBI's Closing Auction Session. Play-money chips, daily 15:15–15:20 IST."
+	/>
+	<meta property="og:image" content="https://niftycasino.niftychronicles.com/og-card.png" />
+	<meta property="og:image:width" content="1200" />
+	<meta property="og:image:height" content="630" />
+	<meta property="og:image:alt" content="NiftyCASino — call the closing auction" />
+
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:title" content="NiftyCASino — call the closing auction" />
+	<meta
+		name="twitter:description"
+		content="Forecast how NIFTY 50, BANKNIFTY and SENSEX close in SEBI's Closing Auction Session. Play-money chips, daily 15:15–15:20 IST."
+	/>
+	<meta name="twitter:image" content="https://niftycasino.niftychronicles.com/og-card.png" />
 </svelte:head>
 
 <div class="flex w-full flex-col gap-5 px-3 pb-24 pt-4 md:px-4 md:pb-10 lg:px-5">

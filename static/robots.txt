@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+
+# Keep private per-user and API routes out of the index
+Disallow: /api/
+Disallow: /auth/
+Disallow: /u/
+
+Sitemap: https://niftycasino.niftychronicles.com/sitemap.xml
