@@ -4,9 +4,10 @@
  *
  * When `index_closes` has no anchor (fresh deploy, or before the 15:15:01 LTP
  * anchor lands), the ladder, the `/api/state` payload and bet validation all
- * fall back to the last closing price the NSE/BSE feeds carry right now — so a logged-in player sees bettable ladders instead of an
- * empty card. Every test here injects the feeds; the real network is never
- * touched.
+ * fall back to the LAST TRADED PRICE the NSE/BSE feeds carry right now — the
+ * same number the chart's first point shows, never yesterday's close — so a
+ * logged-in player sees bettable ladders instead of an empty card. Every test
+ * here injects the feeds; the real network is never touched.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SIGNUP_BONUS } from '$lib/config/app';
@@ -40,11 +41,13 @@ const SENSEX_CLOSE = 82_000;
 const LIVE_DEPS: LiveCloseDeps = {
 	fetchNseIndexData: async () => ({
 		data: [
-			{ indexName: 'NIFTY 50', previousClose: NIFTY_CLOSE, indicativeClose: 0 },
-			{ indexName: 'NIFTY BANK', previousClose: BANK_CLOSE, indicativeClose: 0 }
+			{ indexName: 'NIFTY 50', previousClose: NIFTY_CLOSE, indicativeClose: 0, last: NIFTY_CLOSE },
+			{ indexName: 'NIFTY BANK', previousClose: BANK_CLOSE, indicativeClose: 0, last: BANK_CLOSE }
 		]
 	}),
-	fetchBseSensexRows: async () => [{ indxnm: 'BSE SENSEX', Prev_Close: '82,000', iclsprice: '-' }]
+	fetchBseSensexRows: async () => [
+		{ indxnm: 'BSE SENSEX', Prev_Close: '82,000', iclsprice: '-', ltp: '82,000' }
+	]
 };
 
 const USER = '00000000-0000-4000-8000-00000000u009';
@@ -142,7 +145,7 @@ describe('the reported bug: empty DB, logged-in player', () => {
 			banknifty: BANK_CLOSE,
 			sensex: SENSEX_CLOSE
 		});
-		expect(ladder.options).toHaveLength(95);
+		expect(ladder.options).toHaveLength(110);
 	});
 
 	it('the state payload carries bettable ladders instead of an empty card', async () => {
@@ -156,7 +159,7 @@ describe('the reported bug: empty DB, logged-in player', () => {
 		});
 		expect(payload.user?.handle).toBe('meera');
 		expect(payload.ladder.anchors.nifty).toBe(NIFTY_CLOSE);
-		expect(payload.ladder.options).toHaveLength(95);
+		expect(payload.ladder.options).toHaveLength(110);
 	});
 
 	it('a rung the player could SEE is a rung they can BET', async () => {

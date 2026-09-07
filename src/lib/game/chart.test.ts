@@ -16,6 +16,7 @@ import {
 	formatSignedPoints,
 	istTickLabel,
 	istWallClock,
+	mergeLtpAnchor,
 	ticksToChartPoints,
 	collapseLevels,
 	type CasPoint
@@ -139,6 +140,43 @@ describe('collapseLevels — one dot per price level, latest tick always shown',
 			{ time: 1, value: 25010 },
 			{ time: 2, value: 25010 }
 		]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// mergeLtpAnchor — the LTP seed point only when it precedes the CAS line
+// ---------------------------------------------------------------------------
+
+describe('mergeLtpAnchor — LTP seed point only when it precedes the CAS line', () => {
+	const path = [
+		{ time: 100, value: 25010 },
+		{ time: 104, value: 25020 }
+	];
+
+	it('seeds an empty chart with the LTP point alone', () => {
+		expect(mergeLtpAnchor([], { time: 50, value: 25000 })).toEqual([{ time: 50, value: 25000 }]);
+		expect(mergeLtpAnchor([], null)).toEqual([]);
+	});
+
+	it('prepends the LTP point when it genuinely precedes the first tick', () => {
+		const out = mergeLtpAnchor(path, { time: 50, value: 25000 });
+		expect(out.map((p) => p.time)).toEqual([50, 100, 104]);
+		expect(out[0]).toEqual({ time: 50, value: 25000 });
+	});
+
+	it('drops the LTP point when its timestamp is at or after the first tick', () => {
+		// A page loaded mid-auction carries an LTP timestamp NEWER than the first
+		// CAS tick (ticks start 15:13:30, the LTP freezes 15:15:01). Prepending it
+		// would hand lightweight-charts non-ascending times and the whole day's
+		// line would fail to draw — the reported "movement is gone" bug.
+		expect(mergeLtpAnchor(path, { time: 100, value: 25000 })).toEqual(path);
+		expect(mergeLtpAnchor(path, { time: 999, value: 25000 })).toEqual(path);
+	});
+
+	it('never mutates the path it is handed', () => {
+		const copy = [...path];
+		mergeLtpAnchor(path, { time: 50, value: 25000 });
+		expect(path).toEqual(copy);
 	});
 });
 

@@ -556,6 +556,14 @@ export class MemoryStore implements GameStore {
 				if (newest === null || date > newest) newest = date;
 			}
 			return newest;
+		},
+		listCasTradeDates: async (limit = 30) => {
+			const dates = new Set<string>();
+			for (const key of this.ticksByKey.keys()) {
+				const date = key.split('|')[0] ?? '';
+				if (date) dates.add(date);
+			}
+			return [...dates].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).slice(0, Math.max(0, limit));
 		}
 	};
 

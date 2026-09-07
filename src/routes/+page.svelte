@@ -29,8 +29,16 @@
 		stateLoading,
 		nowIst
 	} from '$lib/stores/game';
-	import type { GamePhase } from '$lib/stores/game';
+	import type { CasLiveValue, GamePhase } from '$lib/stores/game';
 	import { casStream, startCasStream, resyncCasStream } from '$lib/stores/casStream';
+	import {
+		casHistory,
+		historyLatest as historyLatestByIndex,
+		historySeries,
+		loadCasHistoryDays,
+		selectCasHistoryDay
+	} from '$lib/stores/casHistory';
+	import type { CasPoint } from '$lib/game/chart';
 	import { ltpQuotes, startLtpFeed } from '$lib/stores/ltp';
 	import { startRevealWatcher } from '$lib/stores/reveal';
 
@@ -69,6 +77,29 @@
 		banknifty: latest.banknifty ?? ltp.banknifty,
 		sensex: latest.sensex ?? ltp.sensex
 	};
+	// ── CAS history replay: a signed-in visitor can pull up past days once the
+	// board has moved on to the new day (after the next 09:15 IST). The live SSE
+	// socket never stops; selecting a day is a view switch, not a reconnect. ──
+	$: historyState = $casHistory;
+	$: historyActive = historyState.selected !== null;
+	$: historyTicks = $historySeries;
+	$: historyLatest = $historyLatestByIndex;
+	$: if (typeof window !== 'undefined' && authed && !historyState.loaded) {
+		void loadCasHistoryDays();
+	}
+	let historySelect = '';
+	$: if (historyState.selected !== historySelect) {
+		historySelect = historyState.selected ?? '';
+	}
+	/** The ticks a chart draws: the selected day's archive, or the live stream. */
+	function ticksFor(u: LadderUnderlying): CasPoint[] {
+		return historyActive ? (historyTicks?.[u] ?? []) : stream.series[u];
+	}
+	/** The display value a chart's header reads: the replay day's, or the live one. */
+	function latestFor(u: LadderUnderlying): CasLiveValue | null {
+		if (historyActive) return historyLatest?.[u] ?? null;
+		return displayLatest[u];
+	}
 	$: anchors = state.ladder.anchors;
 	// The rank is derived from the XP the payload already carries — never stored,
 	// so a re-tune of the ladder re-titles everyone with no migration.
@@ -365,20 +396,60 @@
 		<p class="text-xs text-zinc-500 dark:text-zinc-400">
 			Last traded price till 15:15 · cash-session chart draws from 15:20 · betting 15:15–15:20 IST
 		</p>
-		<FeedStatusBanner />
+		{#if !historyActive}
+			<FeedStatusBanner />
+		{/if}
+		{#if authed && historyState.days.length > 0}
+			<div class="mt-3 flex flex-wrap items-center gap-2">
+				<label
+					class="text-[11px] font-semibold uppercase tracking-widest text-zinc-500 dark:text-zinc-500"
+					for="cas-history-day"
+				>
+					CAS history
+				</label>
+				<select
+					id="cas-history-day"
+					class="nc-input py-1.5 text-sm"
+					bind:value={historySelect}
+					on:change={() => void selectCasHistoryDay(historySelect === '' ? null : historySelect)}
+				>
+					<option value="">Today · live</option>
+					{#each historyState.days as day (day)}
+						<option value={day}>{day}</option>
+					{/each}
+				</select>
+				{#if historyState.error}
+					<span class="text-xs text-red-600 dark:text-down" role="alert">{historyState.error}</span>
+				{/if}
+				{#if historyActive}
+					<button
+						type="button"
+						class="nc-btn-ghost min-h-[36px] px-3 py-1.5 text-xs"
+						on:click={() => void selectCasHistoryDay(null)}
+					>
+						Exit replay — back to live
+					</button>
+				{/if}
+			</div>
+		{/if}
 		<!-- Theater: expanded chart owns its row; others' charts hide — bets stay put. -->
 		{#if theater}
 			<div class="mt-3">
 				{#each LADDER_UNDERLYINGS.filter((u) => u === theater) as underlying (underlying)}
 					<CasChart
 						{underlying}
-						label={INDEX_LABELS[underlying]}
-						ticks={stream.series[underlying]}
-						latest={displayLatest[underlying]}
-						ltp={ltp[underlying]}
-						anchor={anchors[underlying]}
-						myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
-						{phase}
+						label={historyActive
+							? `${INDEX_LABELS[underlying]} · ${historyState.selected}`
+							: INDEX_LABELS[underlying]}
+						ticks={ticksFor(underlying)}
+						latest={latestFor(underlying)}
+						ltp={historyActive ? null : ltp[underlying]}
+						anchor={historyActive ? null : anchors[underlying]}
+						myBet={historyActive
+							? null
+							: (myBets.find((bet) => bet.underlying === underlying) ?? null)}
+						phase={historyActive ? 'settled' : phase}
+						history={historyActive}
 						isTheater={theater === underlying}
 						isFullscreen={fullscreen === underlying}
 						displayHeight={theaterHeightFor(underlying)}
@@ -397,13 +468,18 @@
 				{#each LADDER_UNDERLYINGS as underlying (underlying)}
 					<CasChart
 						{underlying}
-						label={INDEX_LABELS[underlying]}
-						ticks={stream.series[underlying]}
-						latest={displayLatest[underlying]}
-						ltp={ltp[underlying]}
-						anchor={anchors[underlying]}
-						myBet={myBets.find((bet) => bet.underlying === underlying) ?? null}
-						{phase}
+						label={historyActive
+							? `${INDEX_LABELS[underlying]} · ${historyState.selected}`
+							: INDEX_LABELS[underlying]}
+						ticks={ticksFor(underlying)}
+						latest={latestFor(underlying)}
+						ltp={historyActive ? null : ltp[underlying]}
+						anchor={historyActive ? null : anchors[underlying]}
+						myBet={historyActive
+							? null
+							: (myBets.find((bet) => bet.underlying === underlying) ?? null)}
+						phase={historyActive ? 'settled' : phase}
+						history={historyActive}
 						isTheater={theater === underlying}
 						isFullscreen={fullscreen === underlying}
 						displayHeight={theaterHeightFor(underlying) ?? fullscreenHeightFor(underlying)}
@@ -438,13 +514,18 @@
 					</div>
 					<CasChart
 						underlying={fullscreen}
-						label={INDEX_LABELS[fullscreen]}
-						ticks={stream.series[fullscreen]}
-						latest={displayLatest[fullscreen]}
-						ltp={ltp[fullscreen]}
-						anchor={anchors[fullscreen]}
-						myBet={myBets.find((bet) => bet.underlying === fullscreen) ?? null}
-						{phase}
+						label={historyActive
+							? `${INDEX_LABELS[fullscreen]} · ${historyState.selected}`
+							: INDEX_LABELS[fullscreen]}
+						ticks={ticksFor(fullscreen)}
+						latest={latestFor(fullscreen)}
+						ltp={historyActive ? null : ltp[fullscreen]}
+						anchor={historyActive ? null : anchors[fullscreen]}
+						myBet={historyActive
+							? null
+							: (myBets.find((bet) => bet.underlying === fullscreen) ?? null)}
+						phase={historyActive ? 'settled' : phase}
+						history={historyActive}
 						isFullscreen={true}
 						displayHeight={fullscreenHeightFor(fullscreen)}
 						on:theater={() => {

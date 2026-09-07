@@ -518,7 +518,7 @@ function main(): number {
 			const rows = simulateUnderlying(underlying, scenario, scenarioIndex, samples, seed);
 			if (scenario.gated) baseRows.set(underlying, rows);
 			// Round strikes make the CE and PE distance sets legitimately different
-			// off a fractional anchor (sensex 82,000 → CE 200, 350 … and PE 100, 250 …).
+			// off a fractional anchor (sensex 82,000 → CE 100, 200 … and PE 100, 200 …).
 			// The symmetry test below is only meaningful where the SAME distance is
 			// offered to both directions, so it runs on the shared strikes only.
 			const { up: upSteps, down: downSteps } = ladderStrikesForAnchor(

@@ -160,6 +160,31 @@ export async function ensureLtpAnchors(
 }
 
 /**
+ * Fill the holes in a DB anchor set with the LIVE last traded price — the same
+ * number the chart's first point shows on first load.
+ *
+ * The ladder's anchor is "the last traded price" by game rule, but before the
+ * 15:15:01 LTP anchor freezes (or when its DB row is missing) the DB walk
+ * resolves to the previous trading day's close. A player staring at a chart
+ * whose first point is today's LTP must not see a ladder anchored on
+ * yesterday's close: the live LTP WINS here, with the DB anchor kept only as
+ * the fallback for an index the feeds could not price. Best-effort and never
+ * throwing, exactly like {@link fetchLiveLtp}.
+ */
+export async function fillAnchorsFromLtp(
+	anchors: Record<LadderUnderlying, number | null>,
+	deps: LtpDeps = {},
+	fetchLtp: (deps?: LtpDeps) => Promise<LtpQuotes> = fetchLiveLtp
+): Promise<Record<LadderUnderlying, number | null>> {
+	const live = await fetchLtp(deps);
+	return {
+		nifty: live.nifty?.value ?? anchors.nifty,
+		banknifty: live.banknifty?.value ?? anchors.banknifty,
+		sensex: live.sensex?.value ?? anchors.sensex
+	};
+}
+
+/**
  * The day's persisted `ltp_anchor` rows, as quotes. `prevClose`/`changePts` are
  * unknown to the anchor row itself (it stores only the price), so they read as
  * null/0 — the anchor's job is the LEVEL, not the move.

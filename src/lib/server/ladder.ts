@@ -35,8 +35,14 @@ import {
 	type LadderTargetKind,
 	type LadderUnderlying
 } from '$lib/config/ladder';
-import { ensureLtpAnchors, fetchLiveLtp, isLtpAnchorDue, readLtpAnchors } from '$lib/server/ltp';
-import { fillAnchorsFromLive, type LiveCloseDeps } from '$lib/server/live-closes';
+import {
+	ensureLtpAnchors,
+	fetchLiveLtp,
+	fillAnchorsFromLtp,
+	isLtpAnchorDue,
+	readLtpAnchors
+} from '$lib/server/ltp';
+import type { LiveCloseDeps } from '$lib/server/live-closes';
 import { isWeekend, shiftIstDate } from '$lib/time/ist';
 import { getStore, type GameStore } from '$lib/server/db';
 import type { IndexClose, Underlying } from '$lib/server/db/types';
@@ -206,9 +212,10 @@ export function invalidateLadderCache(): void {
  *    fetched and PERSISTED (`source = 'ltp_anchor'`) right here, so the first
  *    request that notices wins and every later read finds it in the DB (see
  *    `$lib/server/ltp`);
- *  • before 15:15:01 it falls back to the last closing price the feeds carry —
- *    a preview ladder only, since the real anchor is not set yet and bets are
- *    not open.
+ *  • before 15:15:01 (or whenever the anchor rows are missing) it falls back
+ *    to the LIVE last traded price the feeds carry — the same number the chart
+ *    shows on first load, never yesterday's close — a preview ladder only,
+ *    since the real anchor is not set yet and bets are not open.
  *
  * `liveDeps` injects the fetchers (tests) — omit it in production to hit the real
  * feeds, or pass `false` for the DB-only ladder (hermetic tests). `now` is
@@ -264,15 +271,13 @@ export async function getLadderForDateWithLiveFallback(
 		// rather than vanishing — it cannot be bet anyway while its anchor is missing.
 	}
 
+	// The anchor the player reads off the board is the LAST TRADED PRICE — the
+	// chart's first point — not the previous day's close the DB walk resolves to
+	// before the 15:15:01 LTP anchor lands. The live LTP wins; the DB anchor
+	// (yesterday's official close) survives only as the fallback for an index
+	// the feeds could not price right now.
 	const ladder = await getLadderForDate(store, tradeDate);
-	if (
-		ladder.anchors.nifty !== null &&
-		ladder.anchors.banknifty !== null &&
-		ladder.anchors.sensex !== null
-	) {
-		return ladder;
-	}
-	const anchors = await fillAnchorsFromLive(ladder.anchors, liveDeps);
+	const anchors = await fillAnchorsFromLtp(ladder.anchors, liveDeps, () => fetchLiveLtp(liveDeps));
 	return {
 		tradeDate: ladder.tradeDate,
 		anchors,

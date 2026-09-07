@@ -32,10 +32,10 @@ describe('LADDER_CONFIG', () => {
 		expect(LADDER_UNDERLYINGS).toEqual(['nifty', 'banknifty', 'sensex']);
 	});
 
-	it('spaces strikes by round-number steps — 50 / 100 / 150 points', () => {
+	it('spaces strikes by round-number steps — 50 / 100 / 100 points', () => {
 		expect(LADDER_CONFIG.nifty.stepSpacing).toBe(50);
 		expect(LADDER_CONFIG.banknifty.stepSpacing).toBe(100);
-		expect(LADDER_CONFIG.sensex.stepSpacing).toBe(150);
+		expect(LADDER_CONFIG.sensex.stepSpacing).toBe(100);
 	});
 
 	it('keeps the launch tolerances, wider for the wider index', () => {
@@ -45,10 +45,10 @@ describe('LADDER_CONFIG', () => {
 		expect(tolerancePoints('sensex')).toBe(40);
 	});
 
-	it('halves the strike spacing for the dead zone (nifty 25 / banknifty 50 / sensex 75)', () => {
+	it('halves the strike spacing for the dead zone (nifty 25 / banknifty 50 / sensex 50)', () => {
 		expect(deadZoneHalfStep('nifty')).toBe(25);
 		expect(deadZoneHalfStep('banknifty')).toBe(50);
-		expect(deadZoneHalfStep('sensex')).toBe(75);
+		expect(deadZoneHalfStep('sensex')).toBe(50);
 	});
 
 	it('prices every strike at the single accuracy-graded max', () => {
@@ -66,17 +66,16 @@ describe('ladderStrikesForAnchor', () => {
 		]);
 		expect(nifty.down).toEqual(nifty.up);
 
-		// 3% of 82,000 = 2,460 → strikes 79,550 … 84,450. The anchor is NOT a
-		// 150-multiple, so the first CE strike is 82,200 (+200) and the first PE
-		// strike is 81,900 (−100): round levels, unround distances. 82,050 (+50)
-		// also exists inside the dead zone and is now offered (exact-nearest rule).
+		// 3% of 82,000 = 2,460 → strikes 79,600 … 84,400. The anchor IS a
+		// 100-multiple, so both sides mirror at +100 / −100: round levels at round
+		// distances — exactly the 100-point strike series BSE SENSEX options list.
 		const sensex = ladderStrikesForAnchor(82_000, 'sensex');
-		expect(sensex.up).toHaveLength(17);
-		expect(sensex.up[0]).toBe(50);
-		expect(sensex.up[sensex.up.length - 1]).toBe(2_450); // strike 84,450
-		expect(sensex.down).toHaveLength(16);
+		expect(sensex.up).toHaveLength(24);
+		expect(sensex.up[0]).toBe(100);
+		expect(sensex.up[sensex.up.length - 1]).toBe(2_400); // strike 84,400
+		expect(sensex.down).toHaveLength(24);
 		expect(sensex.down[0]).toBe(100); // strike 81,900
-		expect(sensex.down[sensex.down.length - 1]).toBe(2_350); // strike 79,650
+		expect(sensex.down[sensex.down.length - 1]).toBe(2_400); // strike 79,600
 	});
 
 	it('offers the exact strike nearest the anchor on BOTH sides — even inside the dead zone', () => {
@@ -158,10 +157,9 @@ describe('generateLadderOptions', () => {
 
 	it('prices every strike at MAX_HIT_ODDS (the only odds source in the app)', () => {
 		const options = generateLadderOptions(LAUNCH_ANCHORS);
-		// nifty 30, banknifty 32 (its anchor is a 100-multiple, no extra near
-		// level), sensex 33 (anchor 82,000 now offers the +50 in-zone near level):
-		// 30 + 32 + 33 = 95.
-		expect(options.length).toBe(30 + 32 + 33);
+		// nifty 30, banknifty 32, sensex 48 (its 82,000 anchor is itself a
+		// 100-multiple, so both sides mirror at 24 strikes each): 30 + 32 + 48 = 110.
+		expect(options.length).toBe(30 + 32 + 48);
 		for (const option of options) expect(option.odds).toBe(MAX_HIT_ODDS);
 	});
 

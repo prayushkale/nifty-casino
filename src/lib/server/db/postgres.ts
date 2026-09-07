@@ -815,6 +815,13 @@ function createRepos(sql: SqlClient): TxStore {
 				: await sql`select max(trade_date) as trade_date from cas_ticks`;
 			const value = rows[0]?.trade_date;
 			return value ? toDateStr(value) : null;
+		},
+		listCasTradeDates: async (limit = 30) => {
+			const rows = await sql`
+				select distinct trade_date from cas_ticks
+				order by trade_date desc
+				limit ${Math.max(1, Math.trunc(limit))}`;
+			return rows.map((r) => toDateStr(r.trade_date));
 		}
 	};
 
