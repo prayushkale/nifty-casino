@@ -297,7 +297,7 @@
 			anchor
 			<span
 				class="num text-zinc-700 dark:text-zinc-400"
-				title="The last traded price at 15:15 IST — every target is measured from it"
+				title="The last traded price — every target is measured from it"
 				>{anchor === null ? '—' : formatNC(Math.round(anchor))}</span
 			>
 			{#if latestValue !== null && !openPhase}

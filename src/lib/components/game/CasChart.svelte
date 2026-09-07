@@ -27,6 +27,7 @@
 		istTickLabel,
 		ticksToChartPoints,
 		collapseLevels,
+		mergeLtpAnchor,
 		type CasPoint
 	} from '$lib/game/chart';
 	import { theme } from '$lib/stores/theme';
@@ -82,6 +83,12 @@
 	export let isTheater = false;
 	export let isFullscreen = false;
 	export let displayHeight: number | null = null;
+	/**
+	 * Historical replay mode: a past day's archived line is being shown. Kills the
+	 * live-only overlays ("awaiting official close" / settled) and the target-line
+	 * decorations — a past day has no live bets hanging off it.
+	 */
+	export let history = false;
 	const dispatch = createEventDispatcher<{
 		theater: { on: boolean };
 		fullscreen: { on: boolean };
@@ -121,7 +128,7 @@
 		if (n === null || n === undefined) return false;
 		return secOfDayIst(new Date(n)) >= hmsToSeconds(BETTING_START_HMS);
 	})();
-	$: showAwaiting = frozen && isAfter15;
+	$: showAwaiting = !history && frozen && isAfter15;
 
 	/**
 	 * The LTP as the chart's FIRST point. Before 15:20 it is the only point (the
@@ -137,11 +144,19 @@
 		ltp.ts > 0
 			? [{ time: Math.floor(ltp.ts / 1000) as UTCTimestamp, value: ltp.value }]
 			: [];
-	/** The CAS path collapsed to one dot per price level (its first-seen time); the
-	 * LTP anchor is left untouched. Always keeps the latest tick so the current
-	 * price stays on the line at the `lastValueVisible` marker. */
+	/** The CAS path collapsed to one dot per price level (its first-seen time).
+	 * Always keeps the latest tick so the current price stays on the line at the
+	 * `lastValueVisible` marker. */
 	$: casPath = collapseLevels(points);
-	$: displayPoints = casPath.length > 0 ? [...anchorPoints, ...casPath] : anchorPoints;
+	/**
+	 * The LTP seed point merged in front of the collapsed path — but ONLY when it
+	 * genuinely precedes the CAS line. The auction's ticks start at 15:13:30,
+	 * before the 15:15:01 LTP freeze, so on any page loaded mid-auction the LTP
+	 * timestamp is NEWER than the first tick; prepending it would hand the chart
+	 * non-ascending times and the whole day's line would fail to draw. (This was
+	 * the reported bug: refresh after 15:20 → the movement had "gone".)
+	 */
+	$: displayPoints = mergeLtpAnchor(casPath, anchorPoints[0] ?? null);
 	$: hasLtpPoint = anchorPoints.length > 0;
 	$: headerValue =
 		latestValue !== null ? latestValue : hasLtpPoint && ltp !== null ? ltp.value : null;

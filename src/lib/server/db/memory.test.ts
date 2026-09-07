@@ -663,6 +663,41 @@ describe('MemoryStore', () => {
 			// A cutoff before any tick row: null.
 			expect(await store.ticks.latestCasTradeDate('2026-01-01')).toBeNull();
 		});
+
+		it('listCasTradeDates returns the days with ticks, newest first, deduped and capped', async () => {
+			await store.ticks.insertCasTicks([
+				{
+					tradeDate: '2026-08-25',
+					underlying: 'nifty',
+					ts: 1000,
+					value: 1,
+					changePts: 0,
+					changePct: 0
+				},
+				{
+					tradeDate: '2026-08-25',
+					underlying: 'sensex',
+					ts: 2000,
+					value: 1,
+					changePts: 0,
+					changePct: 0
+				},
+				{
+					tradeDate: '2026-08-28',
+					underlying: 'nifty',
+					ts: 1000,
+					value: 1,
+					changePts: 0,
+					changePct: 0
+				}
+			]);
+			// Newest first, each day once (two rows share 2026-08-25), DATE (the
+			// beforeEach day) on top.
+			expect(await store.ticks.listCasTradeDates()).toEqual(['2026-08-28', DATE, '2026-08-25']);
+			// Bounded: the cap is a hard limit, not a floor.
+			expect(await store.ticks.listCasTradeDates(2)).toEqual(['2026-08-28', DATE]);
+			expect(await store.ticks.listCasTradeDates(0)).toEqual([]);
+		});
 	});
 
 	// --------------------------------------------------------------- closes

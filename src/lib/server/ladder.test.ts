@@ -65,7 +65,7 @@ describe('getLadderForDate', () => {
 		expect(ladder.tradeDate).toBe(THURSDAY);
 		expect(ladder.anchors).toEqual({ nifty: 25_000, banknifty: 56_000, sensex: 82_000 });
 		expect(ladder.options).toEqual(generateLadderOptions(ladder.anchors));
-		expect(ladder.options).toHaveLength(95);
+		expect(ladder.options).toHaveLength(110);
 		expect(ladder.generatedAt).toBeGreaterThan(0);
 	});
 
@@ -74,7 +74,7 @@ describe('getLadderForDate', () => {
 		const ladder = await getLadderForDate(store, MONDAY);
 
 		expect(ladder.anchors).toEqual(LAUNCH_ANCHORS);
-		expect(ladder.options).toHaveLength(95);
+		expect(ladder.options).toHaveLength(110);
 	});
 
 	it('serves Saturday and Sunday too — nothing bets on them, but the ladder is answerable', async () => {
@@ -84,7 +84,7 @@ describe('getLadderForDate', () => {
 			const ladder = await getLadderForDate(store, weekendDay);
 			// Saturday's walk-back lands on Friday directly; Sunday skips Saturday too.
 			expect(ladder.anchors, weekendDay).toEqual(LAUNCH_ANCHORS);
-			expect(ladder.options, weekendDay).toHaveLength(95);
+			expect(ladder.options, weekendDay).toHaveLength(110);
 		}
 	});
 
@@ -220,7 +220,7 @@ describe('getLadderForDate', () => {
 		for (let day = 10; day < 20; day += 1) {
 			await getLadderForDate(store, `2026-09-${String(day).padStart(2, '0')}`);
 		}
-		expect((await getLadderForDate(store, THURSDAY)).options).toHaveLength(95);
+		expect((await getLadderForDate(store, THURSDAY)).options).toHaveLength(110);
 	});
 });
 
@@ -229,7 +229,7 @@ describe('resolveLadderOption', () => {
 		const store = await ladderStore(THURSDAY, WEDNESDAY);
 		const { options } = await getLadderForDate(store, THURSDAY);
 
-		expect(options).toHaveLength(95);
+		expect(options).toHaveLength(110);
 		for (const option of options) {
 			const resolved = await resolveLadderOption(
 				THURSDAY,
@@ -250,8 +250,8 @@ describe('resolveLadderOption', () => {
 
 		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', 30, store)).toBeNull(); // not a spacing multiple
 		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', 800, store)).toBeNull(); // beyond the ±3% band
-		// Off the 82,000 anchor the sensex CE distances run 200/350/500 … — 450 is
-		// not a strike distance (the strikes are round 150-multiples, the anchor is not).
+		// Off the 82,000 anchor the sensex CE distances run 100/200/300 … — 450 is
+		// not a strike distance (the strikes are round 100-multiples).
 		expect(await resolveLadderOption(THURSDAY, 'sensex', 'up', 450, store)).toBeNull();
 		expect(await resolveLadderOption(THURSDAY, 'nifty', 'up', -50, store)).toBeNull(); // sign is targetKind's job
 		expect(

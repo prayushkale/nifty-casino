@@ -94,7 +94,7 @@ describe('computeTier — the dead zone is checked first, and strictly', () => {
 	it.each([
 		['nifty', 25],
 		['banknifty', 50],
-		['sensex', 75]
+		['sensex', 50]
 	] as const)(
 		'%s refunds strictly inside ±%s points, whatever the direction',
 		(underlying, halfStep) => {
@@ -111,7 +111,7 @@ describe('computeTier — the dead zone is checked first, and strictly', () => {
 	it.each([
 		['nifty', 25],
 		['banknifty', 50],
-		['sensex', 75]
+		['sensex', 50]
 	] as const)('%s at exactly ±%s is a real move, not a refund', (underlying, halfStep) => {
 		const step = LADDER_CONFIG[underlying].stepSpacing;
 		// At the boundary the target band is still out of reach, so this is a loss —

@@ -12,6 +12,29 @@ import { getStore, resetStoreForTests } from '$lib/server/db';
 import type { Underlying } from '$lib/server/db/types';
 import { istAt } from '$lib/server/cas/test-clock';
 
+// The ladder's live LTP fallback must stay off the real network: the route
+// opts into it by default, and the pre-15:15 ladder is now anchored on the
+// live last traded price. Pinning fetchLiveLtp keeps the suite hermetic (the
+// POST suite mocks the same seam).
+vi.mock('$lib/server/ltp', async (importOriginal) => {
+	const mod = await importOriginal<typeof import('$lib/server/ltp')>();
+	const quote = (underlying: 'nifty' | 'banknifty' | 'sensex', value: number) => ({
+		underlying,
+		value,
+		changePts: 0,
+		changePct: 0,
+		prevClose: value
+	});
+	return {
+		...mod,
+		fetchLiveLtp: async () => ({
+			nifty: quote('nifty', 25_000),
+			banknifty: quote('banknifty', 56_000),
+			sensex: quote('sensex', 82_000)
+		})
+	};
+});
+
 const WEDNESDAY = '2026-08-26';
 const THURSDAY = '2026-08-27';
 const SATURDAY = '2026-08-29';

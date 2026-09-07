@@ -122,7 +122,7 @@ describe('placeBet', () => {
 		const cases: [Underlying, 'up' | 'down', number, number][] = [
 			['nifty', 'up', 50, 28],
 			['banknifty', 'down', 200, 28],
-			['sensex', 'up', 350, 28]
+			['sensex', 'up', 300, 28]
 		];
 		for (const [underlying, targetKind, deltaPoints, odds] of cases) {
 			const bet = await placeBet(
@@ -173,8 +173,8 @@ describe('placeBet', () => {
 			placeBet(U1, nifty({ deltaPoints: 30 }), { now: at(15, 16), store }),
 			'INVALID_TARGET'
 		);
-		// SENSEX strikes sit on round 150-multiples; off the 82,000 anchor the valid
-		// distances are 50/100 mod 150 (200, 350, 100, 250 …) — 450 is off the board.
+		// SENSEX strikes sit on round 100-multiples; off the 82,000 anchor every
+		// distance is a 100 (100, 200, 300 …) — 450 is off the board.
 		await expectCode(
 			placeBet(U1, nifty({ underlying: 'sensex', deltaPoints: 450 }), { now: at(15, 16), store }),
 			'INVALID_TARGET'
@@ -433,7 +433,7 @@ describe('a whole betting day', () => {
 			now: at(15, 15, 30),
 			store
 		});
-		const c = await placeBet(U2, nifty({ underlying: 'sensex', deltaPoints: 350, stake: 60 }), {
+		const c = await placeBet(U2, nifty({ underlying: 'sensex', deltaPoints: 300, stake: 60 }), {
 			now: at(15, 16),
 			store
 		});
@@ -441,7 +441,7 @@ describe('a whole betting day', () => {
 		// A third leg for U1 on a free index, then cancelled: the counters must unwind.
 		const scratch = await placeBet(
 			U1,
-			nifty({ underlying: 'sensex', deltaPoints: 350, stake: 30 }),
+			nifty({ underlying: 'sensex', deltaPoints: 300, stake: 30 }),
 			{
 				now: at(15, 16),
 				store

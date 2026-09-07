@@ -453,6 +453,12 @@ export type TickRepo = {
 	 * `null` when no ticks exist at all up to the cutoff.
 	 */
 	latestCasTradeDate(cutoff?: string): Promise<string | null>;
+	/**
+	 * The IST dates that actually hold tick rows, newest first — the history
+	 * dropdown's option list. Bounded at `limit` so a public endpoint never
+	 * dumps the whole table; a day with no ticks is not a day to replay.
+	 */
+	listCasTradeDates(limit?: number): Promise<string[]>;
 };
 
 export type CloseRepo = {

@@ -8,7 +8,7 @@
  *   absolute index level they expect the CAS close to land at. The generator
  *   builds those strikes across the whole ±3% SEBI CAS band around the anchor
  *   (the last traded price at 15:15:01), spaced by the index's round-number
- *   step (nifty 50, banknifty 100, sensex 150). A nifty anchor of 25,000 with a
+ *   step (nifty 50, banknifty 100, sensex 100). A nifty anchor of 25,000 with a
  *   ±750-point band yields strikes 25,050 … 25,750 and 24,950 … 24,250 — one
  *   selectable price per row, not an offset.
  *
@@ -79,7 +79,7 @@ export type LadderIndexConfig = {
 export const LADDER_CONFIG: Readonly<Record<LadderUnderlying, LadderIndexConfig>> = {
 	nifty: { stepSpacing: 50, tolerancePts: 15 },
 	banknifty: { stepSpacing: 100, tolerancePts: 30 },
-	sensex: { stepSpacing: 150, tolerancePts: 40 }
+	sensex: { stepSpacing: 100, tolerancePts: 40 }
 };
 
 /**

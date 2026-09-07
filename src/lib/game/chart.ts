@@ -91,6 +91,28 @@ export function collapseLevels(points: readonly ChartPoint[]): ChartPoint[] {
 }
 
 /**
+ * Merge the LTP seed point into a collapsed CAS path for the chart.
+ *
+ * The LTP point's job is to seed the chart BEFORE the auction ticks exist — a
+ * single dot at the price the spot market stopped at. Once the CAS line exists
+ * (its ticks start at 15:13:30, BEFORE the 15:15:01 LTP freeze), the LTP point
+ * is only kept when it genuinely precedes the line: `lightweight-charts`
+ * requires strictly ascending times, and a page loaded mid-auction carries an
+ * LTP timestamp NEWER than the first tick, which would make the whole day's
+ * line fail to draw (the reported "movement is gone" bug). A point at or past
+ * the first tick is dropped — the auction's own first indicative already
+ * starts the line.
+ */
+export function mergeLtpAnchor(
+	casPath: readonly ChartPoint[],
+	ltpPoint: ChartPoint | null
+): ChartPoint[] {
+	if (ltpPoint === null) return [...casPath];
+	if (casPath.length === 0) return [ltpPoint];
+	return ltpPoint.time < casPath[0].time ? [ltpPoint, ...casPath] : [...casPath];
+}
+
+/**
  * Which way the day has moved, judged the way the game judges it: the newest
  * indicative against the previous day's official close (PLAN §0 "Anchor"). This
  * picks the line colour, so it is a display concern — `computeTier` remains the

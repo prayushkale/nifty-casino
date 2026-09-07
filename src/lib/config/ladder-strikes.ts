@@ -24,7 +24,7 @@ export type LadderStrikes = {
 
 /**
  * Every round strike level of one index for one anchor, as distances from the
- * anchor — nifty every 50 pts, banknifty every 100, sensex every 150, spanning
+ * anchor — nifty every 50 pts, banknifty every 100, sensex every 100, spanning
  * the whole ±3% CAS band. The nearest offered level per side may sit INSIDE the
  * settlement dead zone (half a spacing) when the anchor is not itself a round
  * level: a nifty anchor of 23,898 puts 23,900 just 2 pts above and 23,850
