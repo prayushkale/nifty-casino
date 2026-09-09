@@ -91,15 +91,23 @@
 	$: if (historyState.selected !== historySelect) {
 		historySelect = historyState.selected ?? '';
 	}
-	/** The ticks a chart draws: the selected day's archive, or the live stream. */
-	function ticksFor(u: LadderUnderlying): CasPoint[] {
-		return historyActive ? (historyTicks?.[u] ?? []) : stream.series[u];
-	}
+	/**
+	 * The ticks a chart draws: the selected day's archive, or the live stream.
+	 *
+	 * REACTIVE ASSIGNMENT, not a plain function: Svelte's compiler cannot see
+	 * through a function's body, so with `function ticksFor(u)` the compiled page
+	 * only re-sent the chart's `ticks` prop when `theater`/`fullscreen` changed —
+	 * a live CAS session updated the store every 2s while every chart sat frozen
+	 * until the player expanded it (the reported "prices only appear when I
+	 * expand" bug). As a `$:` assignment the closure is re-created whenever its
+	 * inputs change, which puts it in the template's dirty mask and the props
+	 * flow on every store tick.
+	 */
+	$: ticksFor = (u: LadderUnderlying): CasPoint[] =>
+		historyActive ? (historyTicks?.[u] ?? []) : stream.series[u];
 	/** The display value a chart's header reads: the replay day's, or the live one. */
-	function latestFor(u: LadderUnderlying): CasLiveValue | null {
-		if (historyActive) return historyLatest?.[u] ?? null;
-		return displayLatest[u];
-	}
+	$: latestFor = (u: LadderUnderlying): CasLiveValue | null =>
+		historyActive ? (historyLatest?.[u] ?? null) : displayLatest[u];
 	$: anchors = state.ladder.anchors;
 	// The rank is derived from the XP the payload already carries — never stored,
 	// so a re-tune of the ladder re-titles everyone with no migration.
