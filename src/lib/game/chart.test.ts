@@ -13,6 +13,7 @@ import {
 	formatIndexLevel,
 	formatIstHm,
 	formatIstHms,
+	formatIstHmsAmPm,
 	formatSignedPoints,
 	istTickLabel,
 	istWallClock,
@@ -147,36 +148,55 @@ describe('collapseLevels — one dot per price level, latest tick always shown',
 // mergeLtpAnchor — the LTP seed point only when it precedes the CAS line
 // ---------------------------------------------------------------------------
 
-describe('mergeLtpAnchor — LTP seed point only when it precedes the CAS line', () => {
+describe('mergeLtpAnchor — the market-close seed at its deterministic 15:15:01 stamp', () => {
 	const path = [
 		{ time: 100, value: 25010 },
 		{ time: 104, value: 25020 }
 	];
 
-	it('seeds an empty chart with the LTP point alone', () => {
-		expect(mergeLtpAnchor([], { time: 50, value: 25000 })).toEqual([{ time: 50, value: 25000 }]);
-		expect(mergeLtpAnchor([], null)).toEqual([]);
+	it('seeds an empty chart with the close point alone', () => {
+		expect(mergeLtpAnchor([], { time: 50, value: 25000 }, 50)).toEqual([
+			{ time: 50, value: 25000 }
+		]);
+		expect(mergeLtpAnchor([], null, 50)).toEqual([]);
+		expect(mergeLtpAnchor([], { time: 50, value: 25000 }, null)).toEqual([]);
 	});
 
-	it('prepends the LTP point when it genuinely precedes the first tick', () => {
-		const out = mergeLtpAnchor(path, { time: 50, value: 25000 });
+	it('prepends the close seed whenever it precedes the first tick', () => {
+		const out = mergeLtpAnchor(path, { time: 999, value: 25000 }, 50);
 		expect(out.map((p) => p.time)).toEqual([50, 100, 104]);
 		expect(out[0]).toEqual({ time: 50, value: 25000 });
 	});
 
-	it('drops the LTP point when its timestamp is at or after the first tick', () => {
-		// A page loaded mid-auction carries an LTP timestamp NEWER than the first
-		// CAS tick (ticks start 15:13:30, the LTP freezes 15:15:01). Prepending it
-		// would hand lightweight-charts non-ascending times and the whole day's
-		// line would fail to draw — the reported "movement is gone" bug.
-		expect(mergeLtpAnchor(path, { time: 100, value: 25000 })).toEqual(path);
-		expect(mergeLtpAnchor(path, { time: 999, value: 25000 })).toEqual(path);
+	it('stamps the seed with closeTime, not the quote ts (which can be anything)', () => {
+		// The live LTP ts can be anything — a page loaded mid-auction carries one
+		// newer than the first CAS tick. The chart trusts only the deterministic
+		// 15:15:01 close instant the caller derives from the trade date.
+		const out = mergeLtpAnchor(path, { time: 999_999, value: 25000 }, 50);
+		expect(out[0].time).toBe(50);
+	});
+
+	it('drops the seed when its close time is at or after the first tick', () => {
+		// Duplicate-second points make lightweight-charts drop the whole day's
+		// line, so a seed that cannot precede the line is omitted entirely.
+		expect(mergeLtpAnchor(path, { time: 50, value: 25000 }, 100)).toEqual(path);
+		expect(mergeLtpAnchor(path, { time: 50, value: 25000 }, 999)).toEqual(path);
+		expect(mergeLtpAnchor(path, { time: 50, value: 25000 }, Number.NaN)).toEqual(path);
 	});
 
 	it('never mutates the path it is handed', () => {
 		const copy = [...path];
-		mergeLtpAnchor(path, { time: 50, value: 25000 });
+		mergeLtpAnchor(path, { time: 50, value: 25000 }, 50);
 		expect(path).toEqual(copy);
+	});
+});
+
+describe('formatIstHmsAmPm — the last-tick readout', () => {
+	it('renders 12-hour IST with an am/pm suffix', () => {
+		expect(formatIstHmsAmPm(at(15, 20, 5) / 1000)).toBe('03:20:05 pm');
+		expect(formatIstHmsAmPm(at(9, 5, 30) / 1000)).toBe('09:05:30 am');
+		expect(formatIstHmsAmPm(at(12, 0, 0) / 1000)).toBe('12:00:00 pm');
+		expect(formatIstHmsAmPm(at(0, 0, 15) / 1000)).toBe('12:00:15 am');
 	});
 });
 

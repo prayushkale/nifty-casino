@@ -451,6 +451,7 @@
 							: INDEX_LABELS[underlying]}
 						ticks={ticksFor(underlying)}
 						latest={latestFor(underlying)}
+						tradeDate={historyActive ? historyState.selected : state.tradeDate}
 						ltp={historyActive ? null : ltp[underlying]}
 						anchor={historyActive ? null : anchors[underlying]}
 						myBet={historyActive
@@ -527,6 +528,7 @@
 							: INDEX_LABELS[fullscreen]}
 						ticks={ticksFor(fullscreen)}
 						latest={latestFor(fullscreen)}
+						tradeDate={historyActive ? historyState.selected : state.tradeDate}
 						ltp={historyActive ? null : ltp[fullscreen]}
 						anchor={historyActive ? null : anchors[fullscreen]}
 						myBet={historyActive
