@@ -16,7 +16,7 @@
 	} from 'lightweight-charts';
 	import type { StateBet } from '$lib/server/state';
 	import type { LadderOption, LadderUnderlying } from '$lib/config/ladder';
-	import { BETTING_START_HMS, COSMETIC_INTERPOLATION } from '$lib/config/app';
+	import { BETTING_START_HMS, COSMETIC_INTERPOLATION, LTP_ANCHOR_HMS } from '$lib/config/app';
 	import { signedTargetPoints } from '$lib/game/tier';
 	import {
 		CHART_COLORS,
@@ -24,6 +24,7 @@
 		dayDirection,
 		formatIndexLevel,
 		formatIstHms,
+		formatIstHmsAmPm,
 		istTickLabel,
 		ticksToChartPoints,
 		collapseLevels,
@@ -38,7 +39,12 @@
 		type CasLiveValue,
 		type GamePhase
 	} from '$lib/stores/game';
-	import { hmsToSeconds, secOfDayIst } from '$lib/time/ist';
+	import {
+		hmsToSeconds,
+		istDateStrToMidnightUtcMs,
+		istHmsToUtcMs,
+		secOfDayIst
+	} from '$lib/time/ist';
 	import Skeleton from './Skeleton.svelte';
 
 	/**
@@ -80,6 +86,12 @@
 	 */
 	export let selectedOption: LadderOption | null = null;
 	export let phase: GamePhase = 'pre';
+	/**
+	 * The IST trade date these ticks belong to ('YYYY-MM-DD', from the server
+	 * payload). Anchors the market-close seed point to 15:15:01 IST of THAT day,
+	 * so a replay of a past day seeds its own close, not today's instant.
+	 */
+	export let tradeDate: string | null = null;
 	export let isTheater = false;
 	export let isFullscreen = false;
 	export let displayHeight: number | null = null;
@@ -131,36 +143,38 @@
 	$: showAwaiting = !history && frozen && isAfter15;
 
 	/**
-	 * The LTP as the chart's FIRST point. Before 15:20 it is the only point (the
-	 * chart deliberately draws no line from it — one dot at the price the spot
-	 * market actually stopped at); after, the CAS ticks extend the line from here.
-	 * A missing/never-stamped LTP renders nothing, never a guessed point.
+	 * The market closing price as the chart's FIRST point: the LTP frozen at
+	 * 15:15:01 IST, when the spot market stops. The seed's timestamp is the
+	 * deterministic 15:15:01 instant of the trade date — never the live quote's
+	 * own ts, which a mid-auction page load stamps NEWER than the first CAS tick
+	 * (15:13:30) and which would make the whole day's line fail to draw. A
+	 * missing/never-stamped LTP renders nothing, never a guessed point.
 	 */
-	$: anchorPoints =
+	$: closeSeedTime =
 		ltp !== null &&
 		Number.isFinite(ltp.value) &&
 		ltp.value > 0 &&
-		Number.isFinite(ltp.ts) &&
-		ltp.ts > 0
-			? [{ time: Math.floor(ltp.ts / 1000) as UTCTimestamp, value: ltp.value }]
-			: [];
+		tradeDate !== null &&
+		tradeDate !== ''
+			? Math.floor(istHmsToUtcMs(istDateStrToMidnightUtcMs(tradeDate), LTP_ANCHOR_HMS) / 1000)
+			: null;
+	$: closeSeedPoint =
+		closeSeedTime !== null && ltp !== null
+			? { time: closeSeedTime as UTCTimestamp, value: ltp.value }
+			: null;
 	/** The CAS path collapsed to one dot per price level (its first-seen time).
 	 * Always keeps the latest tick so the current price stays on the line at the
 	 * `lastValueVisible` marker. */
 	$: casPath = collapseLevels(points);
 	/**
-	 * The LTP seed point merged in front of the collapsed path — but ONLY when it
-	 * genuinely precedes the CAS line. The auction's ticks start at 15:13:30,
-	 * before the 15:15:01 LTP freeze, so on any page loaded mid-auction the LTP
-	 * timestamp is NEWER than the first tick; prepending it would hand the chart
-	 * non-ascending times and the whole day's line would fail to draw. (This was
-	 * the reported bug: refresh after 15:20 → the movement had "gone".)
+	 * The market-close seed merged in front of the collapsed path — kept whenever
+	 * it precedes the first CAS tick (the normal case), dropped at-or-after it.
 	 */
-	$: displayPoints = mergeLtpAnchor(casPath, anchorPoints[0] ?? null);
-	$: hasLtpPoint = anchorPoints.length > 0;
+	$: displayPoints = mergeLtpAnchor(casPath, closeSeedPoint, closeSeedTime);
+	$: hasCloseSeed = closeSeedPoint !== null;
 	$: headerValue =
-		latestValue !== null ? latestValue : hasLtpPoint && ltp !== null ? ltp.value : null;
-	$: headerChange = changePts !== null ? changePts : hasLtpPoint && ltp !== null ? 0 : null;
+		latestValue !== null ? latestValue : hasCloseSeed && ltp !== null ? ltp.value : null;
+	$: headerChange = changePts !== null ? changePts : hasCloseSeed && ltp !== null ? 0 : null;
 	$: headerDirection =
 		points.length > 0
 			? direction
@@ -196,6 +210,22 @@
 		centeringPrice !== null && Number.isFinite(centeringPrice) && centeringPrice > 0
 			? Math.max(centeringPrice * 0.012, 120)
 			: null;
+
+	/**
+	 * The last tick actually drawn on the line — price + IST hh:mm:ss am/pm — so
+	 * during a flat CAS hold it is obvious the chart IS showing the latest price
+	 * (the line just hasn't moved) rather than a stale feed. Falls back to the
+	 * market-close seed before the auction ticks, and shows nothing when there
+	 * is no data at all.
+	 */
+	$: lastTickPoint = displayPoints.length > 0 ? displayPoints[displayPoints.length - 1] : null;
+	$: lastTickLabel =
+		lastTickPoint === null
+			? null
+			: {
+					price: formatIndexLevel(lastTickPoint.value),
+					time: formatIstHmsAmPm(lastTickPoint.time)
+				};
 
 	function makeCenteringProvider(price: number, half: number): unknown {
 		return function (base: () => unknown): unknown {
@@ -621,6 +651,17 @@
 			>
 				<span class="num text-zinc-700 dark:text-zinc-300">{crosshair.time}</span>
 				<span class="num ml-2 text-amber-600 dark:text-gold">{crosshair.value}</span>
+			</div>
+		{/if}
+		{#if lastTickLabel && ready && !crosshair}
+			<!-- Last tick the line actually carries: price + its own hh:mm:ss am/pm.
+			Pinned top-left so a flat hold reads as "latest fetched, no move". -->
+			<div
+				class="pointer-events-none absolute left-2 top-2 rounded border bg-white/95 px-2 py-1 text-xs leading-tight shadow-sm dark:border-felt-700 dark:bg-felt-950/90"
+			>
+				<span class="num font-semibold text-zinc-800 dark:text-zinc-100">{lastTickLabel.price}</span
+				>
+				<span class="num ml-2 text-zinc-500 dark:text-zinc-400">{lastTickLabel.time}</span>
 			</div>
 		{/if}
 	</div>

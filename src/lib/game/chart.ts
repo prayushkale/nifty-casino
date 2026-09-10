@@ -91,25 +91,33 @@ export function collapseLevels(points: readonly ChartPoint[]): ChartPoint[] {
 }
 
 /**
- * Merge the LTP seed point into a collapsed CAS path for the chart.
+ * Merge the market-close LTP seed point into a collapsed CAS path for the chart.
  *
- * The LTP point's job is to seed the chart BEFORE the auction ticks exist — a
- * single dot at the price the spot market stopped at. Once the CAS line exists
- * (its ticks start at 15:13:30, BEFORE the 15:15:01 LTP freeze), the LTP point
- * is only kept when it genuinely precedes the line: `lightweight-charts`
- * requires strictly ascending times, and a page loaded mid-auction carries an
- * LTP timestamp NEWER than the first tick, which would make the whole day's
- * line fail to draw (the reported "movement is gone" bug). A point at or past
- * the first tick is dropped — the auction's own first indicative already
- * starts the line.
+ * The seed's job is to put the price the spot market stopped at (the 15:15:01
+ * freeze) at the head of the line, so the CAS path visibly grows out of the
+ * market closing price. The seed's `time` is NOT the live quote's timestamp —
+ * it is the deterministic `closeTime` (epoch seconds of 15:15:01 IST on the
+ * trade date) the caller derives. A live LTP timestamp can land anywhere
+ * (a page loaded mid-auction carries one NEWER than the first tick), and a
+ * non-ascending point list makes `lightweight-charts` drop the whole day's
+ * line — the reported "movement is gone" bug.
+ *
+ * The seed is prepended whenever it precedes the first CAS tick (the normal
+ * case: ticks start 15:13:30 but the close is stamped 15:15:01); at-or-after
+ * the first tick it is dropped rather than risk a duplicate second. A null or
+ * non-finite `closeTime` renders nothing — never a guessed point.
  */
 export function mergeLtpAnchor(
 	casPath: readonly ChartPoint[],
-	ltpPoint: ChartPoint | null
+	ltpPoint: ChartPoint | null,
+	closeTime: number | null
 ): ChartPoint[] {
-	if (ltpPoint === null) return [...casPath];
-	if (casPath.length === 0) return [ltpPoint];
-	return ltpPoint.time < casPath[0].time ? [ltpPoint, ...casPath] : [...casPath];
+	if (ltpPoint === null || closeTime === null || !Number.isFinite(closeTime)) {
+		return [...casPath];
+	}
+	const seed: ChartPoint = { time: closeTime, value: ltpPoint.value };
+	if (casPath.length === 0) return [seed];
+	return closeTime < casPath[0].time ? [seed, ...casPath] : [...casPath];
 }
 
 /**
@@ -158,6 +166,14 @@ export function formatIstHm(epochSec: number): string {
 export function formatIstHms(epochSec: number): string {
 	const { h, m, s } = istWallClock(epochSec);
 	return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+}
+
+/** '03:20:45 pm' — the last-tick readout, where am/pm reads faster than 24h. */
+export function formatIstHmsAmPm(epochSec: number): string {
+	const { h, m, s } = istWallClock(epochSec);
+	const suffix = h >= 12 ? 'pm' : 'am';
+	const h12 = h % 12 === 0 ? 12 : h % 12;
+	return `${pad2(h12)}:${pad2(m)}:${pad2(s)} ${suffix}`;
 }
 
 /**
