@@ -2,6 +2,10 @@
 node_modules
 *.md
 /build
+/dist
+/desktop/dist
+/.desktop-stage
+/release
 /.svelte-kit
 /package
 .env

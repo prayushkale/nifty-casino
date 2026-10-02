@@ -3,7 +3,12 @@
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
+	"main": "desktop/dist/main.cjs",
 	"description": "Play-money forecasting game for NSE/BSE Closing Auction Session (CAS). No real money.",
+	"author": {
+		"name": "NiftyChronicles",
+		"email": "hello@niftychronicles.com"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
@@ -15,7 +20,12 @@
 		"format": "prettier --write .",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"sim:ev": "tsx scripts/simulate-ev.ts"
+		"sim:ev": "tsx scripts/simulate-ev.ts",
+		"desktop:stage": "npm run build && node scripts/desktop-stage.mjs",
+		"desktop:dev": "npm run desktop:stage && electron .",
+		"desktop:pack": "npm run desktop:stage && electron-builder --dir",
+		"desktop:dist": "npm run desktop:stage && electron-builder",
+		"desktop:dist:linux": "npm run desktop:stage && electron-builder --linux AppImage"
 	},
 	"dependencies": {
 		"@supabase/ssr": "^0.12.5",
@@ -32,6 +42,8 @@
 		"@types/canvas-confetti": "^1.6.4",
 		"@types/node": "^22.0.0",
 		"autoprefixer": "^10.4.20",
+		"electron": "^44.5.1",
+		"electron-builder": "^26.15.3",
 		"eslint": "^9.8.0",
 		"eslint-config-prettier": "^9.1.0",
 		"eslint-plugin-svelte": "^2.43.0",

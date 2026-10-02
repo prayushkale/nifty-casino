@@ -27,6 +27,22 @@ Gates used in CI / every task:
 npm run check && npm run lint && npm run test && npm run build
 ```
 
+## Desktop app
+
+The same game ships as a double-clickable app for Windows, macOS and Linux — it runs its own
+local server in its own window, with no Node, Docker or `.env` required:
+
+```bash
+npm run desktop:dev          # build + launch
+npm run desktop:dist:linux   # → release/NiftyCasino-…-linux-x86_64.AppImage
+```
+
+Windows `.exe` and macOS `.dmg` are built by CI (a `.dmg` cannot be built off a Mac). Each install
+keeps its own local data file, so there is no shared leaderboard in the desktop build — that is
+the trade for zero setup.
+
+Full guide, including code signing: **[docs/DESKTOP.md](docs/DESKTOP.md)**.
+
 ## House edge (EV) simulation
 
 **The launch gate.** Every ladder option must have an expected value in **[0.85, 0.95]** — a
