@@ -9,6 +9,11 @@ build
 dist
 .svelte-kit
 
+# Desktop build
+.desktop-stage/
+release/
+desktop/dist/
+
 # OS
 .DS_Store
 Thumbs.db

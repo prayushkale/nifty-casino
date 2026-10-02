@@ -1,0 +1,96 @@
+# electron-builder config for the NiftyCasino desktop app.
+#
+# Three things here are load-bearing and easy to break by "tidying":
+#
+# 1. `directories.buildResources` MUST NOT be the default `build/`. That is
+#    @sveltejs/adapter-node's output directory, and electron-builder would scan the
+#    compiled server looking for icons.
+#
+# 2. The server ships via `extraResources`, NOT `files`. It lands outside the asar on
+#    purpose: the SvelteKit bundle resolves its externalised runtime deps (postgres,
+#    @supabase/*) with dynamic `import()`, and dynamic imports do not work from inside
+#    an asar archive. asar holds only the tiny Electron main process.
+#
+# 3. `electron` and `electron-builder` are devDependencies, and
+#    scripts/desktop-stage.mjs stages the server with `npm ci --omit=dev`. That is what
+#    keeps ~250 MB of Electron out of the bundled server's node_modules.
+
+directories:
+  output: release
+  buildResources: desktop/resources
+
+appId: com.niftychronicles.niftycasino
+productName: NiftyCasino
+copyright: Copyright © NiftyChronicles
+
+asar: true
+
+# Only the main process goes in the archive. desktop/dist/main.cjs is compiled from
+# desktop/src/main.ts by scripts/desktop-stage.mjs — Electron's main process loads plain
+# JS and will not compile TypeScript itself. The `.cjs` extension is required because this
+# package is `"type": "module"`.
+files:
+  - desktop/dist/**/*
+  - package.json
+
+# The game server, unpacked beside the app. scripts/desktop-stage.mjs bundles the server
+# and its runtime deps into server.mjs, so there is no node_modules here — which matters,
+# because electron-builder prunes a nested node_modules down to the root project's
+# production deps and would ship a server missing `postgres` and `@supabase/*`.
+extraResources:
+  - from: .desktop-stage/server
+    to: server
+
+# Signing is conditional on the presence of credentials, so a repo with no secrets
+# still produces a working (unsigned) build. See docs/DESKTOP.md → Signing.
+win:
+  target:
+    - nsis
+    - portable
+  # One file the user downloads and double-clicks, no install step.
+  artifactName: ${productName}-${version}-win-${arch}.${ext}
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: NiftyCasino
+
+mac:
+  target:
+    - dmg
+  category: public.app-category.games
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  # Universal binaries are produced by CI from two native builds (see
+  # .github/workflows/desktop.yml); merging across arches from one build is flakier.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: desktop/resources/entitlements.mac.plist
+  entitlementsInherit: desktop/resources/entitlements.mac.plist
+
+dmg:
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+
+linux:
+  target:
+    - AppImage
+  category: Game
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+  synopsis: Play-money forecast of the NIFTY / BANKNIFTY / SENSEX closing auction
+  desktop:
+    entry:
+      Name: NiftyCasino
+      Comment: Play-money closing-auction forecast
+      Categories: Game;
+  # Pins the window association to `productName` instead of the executable name, so the
+  # .desktop entry and the running window agree. Without it the executable would be
+  # derived from the package name (`nifty-casino`) and the WM_CLASS would not match.
+  # Left unset deliberately: setting a `desktopName` in package.json renames the binary
+  # itself, which is not what we want the user to see.
+  executableName: NiftyCasino
+
+# No auto-update yet on purpose: electron-updater only works reliably from a signed
+# first release. Revisit once the certificates in docs/DESKTOP.md exist.
+publish: null

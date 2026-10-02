@@ -111,8 +111,15 @@ export type MemoryStoreOptions = {
 	firstSessionId?: number;
 };
 
-/** Point-in-time copy of the whole store, taken at the start of every transaction. */
-type Snapshot = {
+/**
+ * Point-in-time copy of the whole store, taken at the start of every transaction.
+ *
+ * Exported (rather than kept private) so the desktop build can persist a MemoryStore to
+ * disk: every row type is `string | number | null`, so `JSON.stringify` on this shape is
+ * lossless. See ./local-persistence.ts. Nothing in the game path changes — `tx()` below
+ * still uses it purely as a rollback point.
+ */
+export type MemorySnapshot = {
 	profiles: [string, Profile][];
 	userIdByHandle: [string, string][];
 	sessions: [string, DailySession][];
@@ -155,7 +162,10 @@ export class MemoryStore implements GameStore {
 
 	// -- sessions -------------------------------------------------------------
 
-	private readonly sessionRepo: SessionRepo = {
+	// The repo objects are `protected`, not `private`, so a subclass can wrap them (see
+	// ./local-persistence.ts, which adds disk persistence without copying the repos).
+	// They stay readonly: they are behaviour, not state.
+	protected readonly sessionRepo: SessionRepo = {
 		ensureSession: async (tradeDate, cutoffAt) => {
 			const existing = this.sessionsByDate.get(tradeDate);
 			if (existing) return existing; // idempotent: first write wins, never move the cutoff
@@ -194,7 +204,7 @@ export class MemoryStore implements GameStore {
 
 	// -- profiles -------------------------------------------------------------
 
-	private readonly profileRepo: ProfileRepo = {
+	protected readonly profileRepo: ProfileRepo = {
 		getProfile: async (userId) => this.profilesById.get(userId) ?? null,
 		getProfileByHandle: async (handle) => {
 			const userId = this.userIdByHandle.get(handle);
@@ -301,7 +311,7 @@ export class MemoryStore implements GameStore {
 
 	// -- bets -----------------------------------------------------------------
 
-	private readonly betRepo: BetRepo = {
+	protected readonly betRepo: BetRepo = {
 		getBetById: async (betId) => this.betsById.get(betId) ?? null,
 		getBetsForUserOnDate: async (userId, tradeDate) => {
 			const session = this.sessionsByDate.get(tradeDate);
@@ -426,7 +436,7 @@ export class MemoryStore implements GameStore {
 
 	// -- pots / stats ---------------------------------------------------------
 
-	private readonly potRepo: PotRepo = {
+	protected readonly potRepo: PotRepo = {
 		getDailyPot: async (tradeDate) => this.potsByDate.get(tradeDate) ?? null,
 		ensureDailyPot: async (tradeDate) => {
 			const existing = this.potsByDate.get(tradeDate);
@@ -454,7 +464,7 @@ export class MemoryStore implements GameStore {
 		}
 	};
 
-	private readonly statsRepo: StatsRepo = {
+	protected readonly statsRepo: StatsRepo = {
 		getUserStats: async (userId) => {
 			const existing = this.statsByUser.get(userId);
 			if (existing) return existing;
@@ -485,7 +495,7 @@ export class MemoryStore implements GameStore {
 
 	// -- ledger ---------------------------------------------------------------
 
-	private readonly ledgerRepo: LedgerRepo = {
+	protected readonly ledgerRepo: LedgerRepo = {
 		appendLedger: async (entry: NewLedgerEntry) => {
 			if (
 				entry.kind === ('payout' satisfies LedgerKind) &&
@@ -516,7 +526,7 @@ export class MemoryStore implements GameStore {
 
 	// -- ticks / closes -------------------------------------------------------
 
-	private readonly tickRepo: TickRepo = {
+	protected readonly tickRepo: TickRepo = {
 		insertCasTicks: async (rows) => {
 			let stored = 0;
 			const grouped = new Map<string, CasTickRow[]>();
@@ -567,7 +577,7 @@ export class MemoryStore implements GameStore {
 		}
 	};
 
-	private readonly closeRepo: CloseRepo = {
+	protected readonly closeRepo: CloseRepo = {
 		upsertIndexClose: async (close) => {
 			this.closesByKey.set(tickKey(close.tradeDate, close.underlying), { ...close });
 		},
@@ -633,11 +643,11 @@ export class MemoryStore implements GameStore {
 	 * written against this driver behave the same as against Postgres.
 	 */
 	async tx<T>(fn: (tx: TxStore) => Promise<T>): Promise<T> {
-		const snapshot = this.snapshot();
+		const snapshot = this.exportSnapshot();
 		try {
 			return await this.mutex.run(() => fn(this.asTxStore()));
 		} catch (err: unknown) {
-			this.restore(snapshot);
+			this.importSnapshot(snapshot);
 			throw err;
 		}
 	}
@@ -647,8 +657,10 @@ export class MemoryStore implements GameStore {
 	 * The clone happens HERE, on the way in: the repos mutate the live row objects in
 	 * place, so a snapshot of references would be corrupted by the very write it is
 	 * supposed to undo.
+	 *
+	 * Public because the desktop build persists it to disk; the shape is JSON-native.
 	 */
-	private snapshot(): Snapshot {
+	exportSnapshot(): MemorySnapshot {
 		return {
 			profiles: structuredClone([...this.profilesById]),
 			userIdByHandle: [...this.userIdByHandle],
@@ -665,8 +677,8 @@ export class MemoryStore implements GameStore {
 		};
 	}
 
-	/** Swap the snapshot back in. The copies are private to this snapshot, so no clone needed. */
-	private restore(s: Snapshot): void {
+	/** Swap a snapshot back in. The copies are private to that snapshot, so no clone needed. */
+	importSnapshot(s: MemorySnapshot): void {
 		this.profilesById = new Map(s.profiles);
 		this.userIdByHandle = new Map(s.userIdByHandle);
 		this.sessionsByDate = new Map(s.sessions);

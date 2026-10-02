@@ -28,6 +28,17 @@ export default [
 		}
 	},
 	{
-		ignores: ['.svelte-kit/*', 'build/*', 'dist/*', 'node_modules/*', '.commandcode/*']
+		// Generated artefacts, not source: `build/` is adapter-node's output, `dist/` is
+		// desktop/dist (esbuild output), and `.desktop-stage/` is the staged runtime.
+		ignores: [
+			'.svelte-kit/*',
+			'build/*',
+			'dist/*',
+			'desktop/dist/*',
+			'.desktop-stage/*',
+			'release/*',
+			'node_modules/*',
+			'.commandcode/*'
+		]
 	}
 ];
