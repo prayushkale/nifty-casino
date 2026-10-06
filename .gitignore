@@ -28,3 +28,8 @@ coverage/
 
 # Supabase local
 supabase/.temp/
+
+# Demo video (large media — kept out of git)
+demo.mov
+demo-annotated.mp4
+videos/

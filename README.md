@@ -13,6 +13,15 @@ and the cash-session chart draws from 15:20 out of that frozen LTP point.
 
 > **No real money. Entertainment only.** Chips (`NC`) are virtual with zero cash-out.
 
+## Demo
+
+A narrated, fully annotated walkthrough of one trading day — the game floor, placing calls,
+the live auction chart, and settlement:
+
+[![Watch the NiftyCasino demo on YouTube](https://img.youtube.com/vi/CgaSs-JhYt0/maxresdefault.jpg)](https://youtu.be/CgaSs-JhYt0)
+
+▶️ **[Watch the full demo (16:40)](https://youtu.be/CgaSs-JhYt0)**
+
 ## Quick start
 
 ```bash
